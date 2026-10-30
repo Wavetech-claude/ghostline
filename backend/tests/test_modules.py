@@ -18,12 +18,14 @@ def weekdays(n: int, start: dt.date = dt.date(2025, 9, 1)) -> list[dt.date]:
     return out
 
 
-def bars_from(closes: list[float], volumes: list[float] | None = None, start: dt.date = dt.date(2025, 9, 1)) -> list[dict]:
+def bars_from(closes: list[float], volumes: list[float] | None = None, start: dt.date = dt.date(2025, 9, 1),
+              opens: dict[int, float] | None = None) -> list[dict]:
+    """Daily bars whose open is the prior close, except where `opens` names a gap."""
     days = weekdays(len(closes), start)
     out = []
     for i, c in enumerate(closes):
         prev = closes[i - 1] if i else c
-        o = prev
+        o = (opens or {}).get(i, prev)
         hi, lo = max(o, c) * 1.004, min(o, c) * 0.996
         v = volumes[i] if volumes else 1_000_000
         out.append({"ticker": "T", "timeframe": "1D", "ts": dt.datetime.combine(days[i], dt.time(13, 0), tzinfo=dt.UTC),
@@ -85,10 +87,10 @@ def test_trend_helpers():
 def pead_bars() -> tuple[list[dict], list[dict]]:
     closes = ramp(90, 100, 60)
     report_day = weekdays(60)[59]
-    closes += [106, 107, 108]                 # the gap week (after-close report)
-    closes += [110, 108, 107, 106, 107]       # a red week: open 110, close 107 (high ≈ 110.4, low ≈ 105.6)
+    closes += [106, 107, 108, 109, 110]       # the gap week, Monday to Friday (the report came after Friday's close)
+    closes += [109, 108, 107, 106, 107]       # a red week: open 110, close 107 (high ≈ 110.4, low ≈ 105.6)
     closes += [108, 110, 112]                 # the current green week closing above the red high
-    bars = bars_from(closes)
+    bars = bars_from(closes, opens={60: 106.0})   # the gap at Monday's open
     earnings = [{"ticker": "T", "at": report_day, "estimate": D("1.0"), "actual": D("1.2")}]
     return bars, earnings
 
@@ -113,8 +115,9 @@ def test_pead_is_silent_without_a_recent_report_and_flags_a_small_gap():
 
 
 def test_earnings_trade_scores_five_factors_and_grades():
-    closes = ramp(80, 100, 240) + [109, 110, 111, 112, 113]
-    bars = bars_from(closes)
+    closes = ramp(80, 90, 220) + ramp(90.5, 100, 20) + [109, 110, 111, 112, 113]     # +11% into the report
+    vols = [1_000_000.0] * 220 + [1_600_000.0] * 20 + [3_000_000.0] * 5
+    bars = bars_from(closes, vols, opens={240: 108.5})
     report_day = bars[239]["ts"].date()
     s = earnings_trade.signal("T", bars, [{"ticker": "T", "at": report_day, "estimate": None, "actual": D("2")}])
     assert s is not None and set(s.evidence["scores"]) == {"gap", "trend", "volume", "ma200", "ma50"}
@@ -125,8 +128,8 @@ def test_earnings_trade_scores_five_factors_and_grades():
 
 # ── CANSLIM ─────────────────────────────────────────────────────────────────────────────────────────────────
 def test_canslim_scores_what_it_can_and_names_the_unknown():
-    closes = ramp(50, 100, 300)
-    vols = [1_500_000.0 if i % 2 else 800_000.0 for i in range(300)]   # up days (rising series) carry more volume
+    closes = [v + (1.5 if i % 2 else 0.0) for i, v in enumerate(ramp(50, 100, 300))]   # up on odd days, down on even
+    vols = [1_500_000.0 if i % 2 else 800_000.0 for i in range(300)]                    # up days carry more volume
     bars = bars_from(closes, vols)
     last_day = bars[-1]["ts"].date()
     earnings = [{"ticker": "T", "at": last_day - dt.timedelta(days=10), "estimate": None, "actual": D("2.0")},
@@ -146,8 +149,8 @@ def test_canslim_growth_arithmetic():
     g, meta = canslim.quarterly_growth([{"at": dt.date(2026, 1, 1), "actual": D("3")}, {"at": dt.date(2025, 1, 2), "actual": D("2")}])
     assert round(g) == 50 and meta["prior_year"] == "2"
     assert canslim.quarterly_growth([{"at": dt.date(2026, 1, 1), "actual": D("3")}])[0] is None
-    cagr, meta = canslim.annual_growth([{"date": "2025", "eps": 2.0, "revenue": 100}, {"date": "2024", "eps": 1.6, "revenue": 90},
-                                        {"date": "2023", "eps": 1.3, "revenue": 80}, {"date": "2022", "eps": 1.0, "revenue": 70}])
+    cagr, meta = canslim.annual_growth([{"date": "2025", "eps": 2.0, "revenue": 100}, {"date": "2024", "eps": 1.6, "revenue": 85},
+                                        {"date": "2023", "eps": 1.3, "revenue": 75}, {"date": "2022", "eps": 1.0, "revenue": 65}])
     assert 25 < cagr < 27 and meta["stable"]
     assert canslim.a_score(cagr, meta) == 60                          # 50 for 25–29% + the stability bonus
 

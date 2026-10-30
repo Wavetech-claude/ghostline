@@ -34,8 +34,8 @@ def test_a_signal_becomes_a_sized_idea_through_the_rules(client):
     made = scan.idea(sid, swing_signal())
     assert made["status"] == "open", made
     row = db.fetch_one("SELECT * FROM ideas WHERE id = %s", (made["id"],))
-    # 1.5% of 10,000 = 150 at risk, 5 per share → 30 shares (3,000, under the 20% cap)
-    assert row["quantity"] == D("30") and row["max_loss"] == D("150.00") and row["size_share"] == D("0.3000") or row["size_share"] == D("0.3")
+    # 1.5% of 10,000 = 150 at risk, 5 per share → 30 shares (3,000), capped at a fifth of the balance → 20 shares
+    assert row["quantity"] == D("20") and row["max_loss"] == D("100.00") and row["size_share"] == D("0.2000")
     assert row["book"] == "practice" and row["balance"] == D("10000.00") and row["risk_decision_id"]
     # the same signal again is the same open idea, not a second one
     assert scan.idea(sid, swing_signal())["existing"] is True
@@ -55,10 +55,10 @@ def test_the_size_is_capped_at_a_fifth_of_the_balance(client):
     earnings("AAPL", 40)
     set_rules(client, h)
     scan = Scan(db)
-    s = swing_signal(entry=100.0, stop=99.5)                     # 0.50 per share → 300 shares would be 30,000
+    s = swing_signal(entry=100.0, stop=90.0)                     # 10 per share → 15 shares, 1,500: under the cap
     made = scan.idea(scan.save(s), s)
-    row = db.fetch_one("SELECT quantity, max_loss FROM ideas WHERE id = %s", (made["id"],))
-    assert row["quantity"] == D("20") and row["max_loss"] == D("10.00")
+    row = db.fetch_one("SELECT quantity, max_loss, size_share FROM ideas WHERE id = %s", (made["id"],))
+    assert row["quantity"] == D("15") and row["max_loss"] == D("150.00") and row["size_share"] == D("0.1500")
 
 
 def test_a_refused_idea_keeps_its_reason(client):

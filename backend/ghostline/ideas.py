@@ -196,6 +196,10 @@ class Scan:
             premium = entry or Decimal(0)
             max_loss = ledger.money((opt.strike - (stop or Decimal(0)) - premium) * 100 * qty)
             size_share = (collateral / facts.equity).quantize(Decimal("0.0001")) if facts.equity else None
+            u = self.practice.latest_quote(s.ticker) or {}
+            spread = None
+            if u.get("bid") is not None and u.get("ask") is not None and Decimal(u["ask"]) > 0:
+                spread = ((Decimal(u["ask"]) - Decimal(u["bid"])) / Decimal(u["ask"])).quantize(Decimal("0.0001"))
             idea = risk.Idea(
                 kind="puts",
                 max_loss=max_loss,
@@ -203,7 +207,7 @@ class Scan:
                 days_to_earnings=self.practice._days_to_earnings(s.ticker),
                 avg_volume=self.practice._avg_volume(s.ticker),
                 open_interest=_q(s.evidence.get("best", {}).get("open_interest")),
-                spread_share=_q(s.evidence.get("best", {}).get("spread_share")),
+                spread_share=spread,
                 book=book,
             )
         elif entry and stop and entry > stop:

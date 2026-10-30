@@ -46,6 +46,11 @@ struct AccountView: View {
                 Button { ledger.showingCashFlow = true } label: { Label("Add Money", systemImage: "plus") }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
             }
+            #if os(iOS)
+            ToolbarItem(placement: .secondaryAction) {
+                NavigationLink { SettingsView() } label: { Label("Settings", systemImage: "slider.horizontal.3") }
+            }
+            #endif
         }
         .task { await ledger.loadBooks() }
         .refreshable { await ledger.loadBooks() }

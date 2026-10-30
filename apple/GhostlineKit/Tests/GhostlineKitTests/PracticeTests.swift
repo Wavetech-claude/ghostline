@@ -49,3 +49,22 @@ import Testing
         #expect(FakeServer.seen(host).first?.url?.query() == "ticker=X&expiry=2026-11-20&book=practice")
     }
 }
+
+@Suite struct IdeasModelTests {
+    @Test func decodesIdeasWithARefusedOneAndTheEvidence() throws {
+        let json = #"""
+        {"ideas":[{"id":1,"lane":"swing","ticker":"MSFT","signal_id":3,"module":"vcp","status":"refused","book":"practice","balance":"10000.00",
+          "entry":"50.0000","stop":"48.0000","target":"60.0000","quantity":"20","size_share":"0.1000","max_loss":"40.00","collateral":null,"option_symbol":null,
+          "refusal":"earnings_blackout_days: the earnings date is unknown","opens_at":"2026-10-30T10:00:00+00:00","expires_at":"2026-12-09T10:00:00+00:00",
+          "score":"80.00","reason":"MSFT: a tight base","horizon_days":40,"as_of":"2026-10-30T09:00:00+00:00","source":"test","direction":"long"}],
+         "counts":[{"lane":"swing","status":"refused","n":1}],"last_scan":{"day":"2026-10-30","signals":7}}
+        """#
+        let i = try GhostlineJSON.decoder().decode(Ideas.self, from: Data(json.utf8))
+        #expect(i.ideas[0].refusal?.hasPrefix("earnings_blackout_days") == true && !i.ideas[0].isOpen && i.lastScan.signals == 7)
+        let sig = #"{"id":3,"ticker":"MSFT","module":"vcp","lane":"swing","direction":"long","score":"80.00","actionable":true,"horizon_days":40,"entry":"50","stop":"48","target":"60","reason":"r","evidence":{"state":"pre_breakout","pivot":50.25,"checks":{"a":true},"ok":true},"day":"2026-10-30","source":"test","as_of":"x"}"#
+        let s = try GhostlineJSON.decoder().decode(SignalRow.self, from: Data(sig.utf8))
+        let lines = s.evidence.lines
+        #expect(lines.map(\.0) == ["checks", "ok", "pivot", "state"])
+        #expect(lines.map(\.1) == ["1 fields", "yes", "50.25", "pre_breakout"])
+    }
+}
