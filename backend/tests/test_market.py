@@ -2,6 +2,7 @@
 counters, jobs that skip without a key, the chart payload, and the routes."""
 import datetime as dt
 import json
+import logging
 from decimal import Decimal
 
 import httpx
@@ -12,8 +13,8 @@ from ghostline.config import Settings
 from ghostline.db import Database
 from ghostline.market import NotConfigured, RateLimited, store
 from ghostline.market.jobs import Jobs
-from ghostline.market.limits import Limiter
-from ghostline.market.sources import FMP, FRED, Alpaca, Edgar, Finnhub, Tradier, configured
+from ghostline.market.limits import LIMITS, Limiter
+from ghostline.market.sources import FMP, FRED, Alpaca, Edgar, Finnhub, Massive, Tradier, configured
 from tests.conftest import settings, sign_in
 
 ANSWERS = {
@@ -31,6 +32,7 @@ ANSWERS = {
     "data.sec.gov/submissions/CIK0000320193.json": {"filings": {"recent": {
         "accessionNumber": ["0000320193-26-000001", "0000320193-26-000002"], "form": ["10-K", "SC 13G"],
         "filingDate": ["2026-10-20", "2026-10-21"], "primaryDocument": ["a10k.htm", "x.htm"]}}},
+    "api.massive.com/v2/aggs/grouped/locale/us/market/stocks/2026-10-01": {"results": []},
     "api.stlouisfed.org/fred/series/observations": {"observations": [{"date": "2026-10-01", "value": "4.1"},
                                                                      {"date": "2026-10-02", "value": "."}]},
     "api.tradier.com/v1/markets/quotes": {"quotes": {"quote": {"symbol": "AAPL", "bid": 101.0, "ask": 101.2,
@@ -347,3 +349,97 @@ def test_each_past_report_shows_how_the_stock_moved_around_it(client):
     assert got == {"2026-10-28": "-4.50",          # 100 (the 27th) to 95.50 (the 29th)
                    "2026-10-29": None,             # no close after it yet
                    "2027-01-28": None}             # not reported yet
+
+
+SECRET_KEYS = {"ALPACA": "alpaca-id-0123456789", "ALPACA_SECRET": "alpaca-secret-0123456789",
+               "MASSIVE": "massive-key-0123456789", "FMP": "fmp-key-0123456789abc", "FINNHUB": "finnhub-key-0123456789",
+               "FRED": "fred-key-0123456789abcd", "TRADIER": "tradier-key-0123456789"}
+
+
+def test_a_failed_call_never_stores_or_logs_a_key(fresh_db, monkeypatch, caplog):
+    """FMP's key reached staging's data_pulls on 2026-10-30: httpx's error text names the whole address, and FMP,
+    Finnhub, Massive and FRED took their keys in the query. Here every source fails, and its answer even echoes the keys."""
+    for k, v in SECRET_KEYS.items():
+        monkeypatch.setenv(f"GHOSTLINE_KEY_{k}", v)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, text="refused " + " ".join(SECRET_KEYS.values()))
+    db = Database(settings())
+    jobs = Jobs(db, httpx.Client(transport=httpx.MockTransport(handler)))
+    src, day = jobs.sources, dt.date(2026, 10, 29)
+    calls = [("massive", src["massive"].grouped_daily, day), ("fmp", src["fmp"].earnings, "AAPL"),
+             ("fmp", src["fmp"].profile, "AAPL"), ("finnhub", src["finnhub"].news, "AAPL", day, day),
+             ("fred", src["fred"].series, "DGS10", day), ("alpaca", src["alpaca"].bars, "AAPL", day, day),
+             ("tradier", src["tradier"].quotes, ["AAPL"]), ("edgar", src["edgar"].filings, "AAPL")]
+    with caplog.at_level(logging.INFO):
+        for source, fn, *args in calls:
+            assert jobs._call(source, "probe", fn, *args) is None
+    details = [r["detail"] for r in db.fetch_all("SELECT detail FROM data_pulls WHERE status = 'error' ORDER BY id")]
+    assert len(details) == len(calls) and all("402 Payment Required" in d for d in details)
+    assert details[1].startswith("SourceError: fmp /stable/earnings: 402")      # what failed, where, and why
+    written = " ".join(details) + caplog.text
+    assert [k for k, v in SECRET_KEYS.items() if v in written] == []
+    assert "?" not in " ".join(details)                                         # no query string at all
+    db.close()
+
+
+def test_keys_travel_in_headers_except_freds(keys):
+    http, seen = fake_http()
+    day = dt.date(2026, 10, 1)
+    FMP(http).profile("AAPL")
+    FMP(http).earnings("AAPL")
+    Finnhub(http).news("AAPL", day, day)
+    Massive(http).grouped_daily(day)
+    assert [k for r in seen for k in ("test-fmp", "test-finnhub", "test-massive") if k in str(r.url)] == []
+    assert seen[0].headers["apikey"] == "test-fmp" and seen[1].url.params["limit"] == "5"   # the free plan's most
+    assert seen[2].headers["X-Finnhub-Token"] == "test-finnhub"
+    assert seen[3].headers["Authorization"] == "Bearer test-massive"
+    FRED(http).series("DGS10", day)
+    assert seen[4].url.params["api_key"] == "test-fred"        # FRED takes no header; Source.fetch keeps it out of errors
+
+
+def test_fmp_history_is_asked_only_for_the_owners_names(fresh_db, keys):
+    db = Database(settings())
+    http, seen = fake_http()
+    db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL')")
+    store.save_universe(db, dt.date.today(), [{"ticker": "MSFT", "reason": "movers"}])
+    Jobs(db, http).pull_news_earnings()
+    asked = {(r.url.host, r.url.path.rsplit("/", 1)[-1], r.url.params.get("symbol")) for r in seen}
+    assert ("finnhub.io", "earnings", "MSFT") in asked and ("finnhub.io", "earnings", "AAPL") in asked
+    assert {sym for host, _, sym in asked if host == "financialmodelingprep.com"} == {"AAPL"}
+    db.close()
+
+
+def test_each_environment_takes_its_share_and_the_two_stay_inside_the_limit(fresh_db):
+    db = Database(settings())
+    prod, staging = Limiter(db, "prod"), Limiter(db, "staging")
+    assert prod.limits("fmp") == (None, 200) and staging.limits("fmp") == (None, 50)
+    assert prod.limits("finnhub") == (48, None) and staging.limits("finnhub") == (12, None)
+    for source, pair in LIMITS.items():
+        for i, limit in enumerate(pair):
+            if limit and limit > 1:         # a limit of 1 cannot be split (GDELT: different minutes instead)
+                assert prod.limits(source)[i] + staging.limits(source)[i] <= limit, source
+    assert Limiter(db, "test").limits("fmp") == (None, 250)
+    db.close()
+
+
+def test_a_job_waits_out_a_full_minute_but_never_a_full_day(fresh_db):
+    db = Database(settings())
+    slept = []
+
+    def sleep(seconds: float) -> None:      # time passes: every counted call moves a minute into the past
+        slept.append(seconds)
+        db.execute("UPDATE data_pulls SET at = at - interval '61 seconds'")
+    lim = Limiter(db, "staging", sleep=sleep)
+    for _ in range(12):
+        lim.record("finnhub", "calendar/earnings", "ok", rows=1)
+    with pytest.raises(RateLimited):
+        lim.check("finnhub")                # a request from the app never waits
+    lim.check("finnhub", wait=True)         # a job waits until the oldest call leaves the minute
+    assert len(slept) == 1 and 0 < slept[0] <= 61
+    for _ in range(50):
+        lim.record("fmp", "profile", "ok", rows=1)
+    with pytest.raises(RateLimited, match="a day"):
+        lim.check("fmp", wait=True)
+    assert len(slept) == 1                  # a day's limit is never waited for
+    db.close()

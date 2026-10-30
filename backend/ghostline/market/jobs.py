@@ -22,15 +22,17 @@ PUT_DTE = (30, 45)
 
 
 class Jobs:
-    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None) -> None:
+    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None,
+                 env: str | None = None) -> None:
         self.db = db
-        self.limiter = Limiter(db)
+        self.limiter = Limiter(db, env)
         self.sources = sources or {name: cls(http) for name, cls in ALL.items()}
 
-    def _call(self, source: str, endpoint: str, fn, *args) -> Any:
-        """One counted call: refused before the limit, recorded after, never raised past the job."""
+    def _call(self, source: str, endpoint: str, fn, *args, wait: bool = True) -> Any:
+        """One counted call: paced through a full minute (wait), refused at the day's limit, recorded after, never
+        raised past the job."""
         try:
-            self.limiter.check(source)
+            self.limiter.check(source, wait=wait)
             result = fn(*args)
             self.limiter.record(source, endpoint, "ok", rows=len(result) if hasattr(result, "__len__") else 1)
             return result
@@ -86,11 +88,11 @@ class Jobs:
                              today + dt.timedelta(days=120))
             if cal:
                 out["earnings"] += store.save_earnings(self.db, cal, "finnhub", utcnow())
-            hist = self._call("fmp", "earnings", fmp.earnings, ticker)
+            if ticker not in tracked:
+                continue          # history, news and filings only for what the owner holds or watches
+            hist = self._call("fmp", "earnings", fmp.earnings, ticker)       # FMP's 250 a day go to the owner's names
             if hist:
                 out["earnings"] += store.save_earnings(self.db, hist, "fmp", utcnow())
-            if ticker not in tracked:
-                continue          # news and filings only for what the owner holds or watches
             news = self._call("finnhub", "company-news", finnhub.news, ticker, today - dt.timedelta(days=14), today)
             if news:
                 out["news"] += store.save_news(self.db, news, "finnhub", utcnow())
@@ -148,7 +150,7 @@ class Jobs:
             return {"asked": None, "points": 0, "stale": 0}
         q = min(stale, key=lambda s: newest.get(f"gdelt:{s}") or dt.date.min)     # ties: the first in TONE_QUERIES
         gdelt: GDELT = self.sources["gdelt"]
-        pts = self._call("gdelt", "timelinetone", gdelt.tone, q, 7)
+        pts = self._call("gdelt", "timelinetone", gdelt.tone, q, 7, wait=False)     # stop at a full minute too
         return {"asked": q, "points": store.save_macro(self.db, pts, "gdelt", utcnow()) if pts else 0,
                 "stale": len(stale)}
 

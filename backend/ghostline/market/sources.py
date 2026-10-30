@@ -2,10 +2,15 @@
 client (tests inject a MockTransport), answers turned into the dataclasses of ghostline.market. No source computes
 anything, and none is called without a key: NotConfigured stops the job with a logged reason.
 
+Keys travel in headers wherever the source accepts one; FRED takes only a query parameter. A failed call raises
+SourceError, whose text never holds the query: httpx's own error names the whole address, key included, and that text
+is stored in data_pulls and logged (FMP's key reached staging's data_pulls that way on 2026-10-30).
+
 Endpoints (read 2026-10, each a public free tier):
   Alpaca   https://data.alpaca.markets/v2  bars, latest quotes (IEX feed)   keys: APCA-API-KEY-ID + APCA-API-SECRET-KEY
   Massive  https://api.massive.com/v2       grouped daily bars (the whole market in one call), 5/min
-  FMP      https://financialmodelingprep.com/stable  profile, ratios, earnings calendar, 250/day
+  FMP      https://financialmodelingprep.com/stable  profile, ratios, income, earnings history, 250/day
+           (free plan, checked 2026-10-30: earnings history at most 5 quarters, and not for every symbol)
   Finnhub  https://finnhub.io/api/v1        company news, earnings calendar, quote
   EDGAR    https://data.sec.gov             submissions (filings), no key, a User-Agent with contact
   FRED     https://api.stlouisfed.org/fred  series observations
@@ -15,19 +20,32 @@ Endpoints (read 2026-10, each a public free tier):
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 from decimal import Decimal
 from typing import Any
 
 import httpx
 
-from ghostline.market import Bar, Earning, Filing, MacroPoint, NewsItem, NotConfigured, Quote, dec
+from ghostline.market import Bar, Earning, Filing, MacroPoint, NewsItem, NotConfigured, Quote, SourceError, dec
 
 UA = "Ghostline/0.2 (personal research tool; contact: owner)"
+
+# httpx logs every request's whole address at INFO, and FRED's key travels in its query: the worker logs at INFO and
+# its log goes to Loki, so httpx speaks only from WARNING up in any process that calls a source.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def key_for(name: str) -> str | None:
     return os.environ.get(f"GHOSTLINE_KEY_{name.upper()}") or None
+
+
+def _masked(text: str, limit: int = 160) -> str:
+    """A source's own error text, short and on one line, with every key we hold replaced (a source may echo one)."""
+    for name, value in os.environ.items():
+        if name.startswith("GHOSTLINE_KEY_") and len(value) >= 8:
+            text = text.replace(value, "***")
+    return " ".join(text.split())[:limit]
 
 
 def _date(s: Any) -> dt.date | None:
@@ -63,8 +81,18 @@ class Source:
         return k or ""
 
     def get(self, path: str, params: dict | None = None, headers: dict | None = None) -> Any:
-        r = self.http.get(self.base_url + path, params=params, headers=headers)
-        r.raise_for_status()
+        return self.fetch(self.base_url + path, params, headers)
+
+    def fetch(self, url: str, params: dict | None = None, headers: dict | None = None) -> Any:
+        """One GET. A failure raises SourceError with the path, the status and the source's reason, never the query;
+        `from None` drops httpx's exception, whose text and traceback hold the whole address."""
+        where = f"{self.name} {httpx.URL(url).path}"
+        try:
+            r = self.http.get(url, params=params, headers=headers)
+        except httpx.HTTPError as exc:
+            raise SourceError(f"{where}: {type(exc).__name__}") from None
+        if r.is_error:
+            raise SourceError(f"{where}: {r.status_code} {r.reason_phrase}: {_masked(r.text)}")
         return r.json()
 
 
@@ -106,8 +134,8 @@ class Massive(Source):
     base_url = "https://api.massive.com/v2"
 
     def grouped_daily(self, day: dt.date) -> dict[str, Bar]:
-        j = self.get(f"/aggs/grouped/locale/us/market/stocks/{day.isoformat()}",
-                     params={"adjusted": "true", "apiKey": self.key()})
+        j = self.get(f"/aggs/grouped/locale/us/market/stocks/{day.isoformat()}", params={"adjusted": "true"},
+                     headers={"Authorization": f"Bearer {self.key()}"})
         out = {}
         for r in j.get("results") or []:
             ts = _stamp(r.get("t"))
@@ -120,23 +148,27 @@ class FMP(Source):
     name = "fmp"
     base_url = "https://financialmodelingprep.com/stable"
 
+    def _headers(self) -> dict:
+        return {"apikey": self.key()}
+
     def profile(self, ticker: str) -> dict:
-        j = self.get("/profile", params={"symbol": ticker, "apikey": self.key()})
+        j = self.get("/profile", params={"symbol": ticker}, headers=self._headers())
         return (j[0] if isinstance(j, list) and j else j) or {}
 
     def ratios(self, ticker: str) -> dict:
-        j = self.get("/ratios-ttm", params={"symbol": ticker, "apikey": self.key()})
+        j = self.get("/ratios-ttm", params={"symbol": ticker}, headers=self._headers())
         return (j[0] if isinstance(j, list) and j else j) or {}
 
     def income_annual(self, ticker: str, limit: int = 5) -> list[dict]:
         """Annual EPS and revenue, newest first (CANSLIM's A)."""
-        j = self.get("/income-statement", params={"symbol": ticker, "period": "annual", "limit": limit,
-                                                  "apikey": self.key()})
+        j = self.get("/income-statement", params={"symbol": ticker, "period": "annual", "limit": limit},
+                     headers=self._headers())
         return [{"date": r.get("date"), "eps": r.get("eps"), "revenue": r.get("revenue")} for r in (j or [])
                 if isinstance(r, dict)]
 
     def earnings(self, ticker: str) -> list[Earning]:
-        j = self.get("/earnings", params={"symbol": ticker, "apikey": self.key(), "limit": 12})
+        """The last reports, newest first. The free plan refuses a limit above 5 (402), and some symbols outright."""
+        j = self.get("/earnings", params={"symbol": ticker, "limit": 5}, headers=self._headers())
         return [Earning(ticker, d, dec(e.get("epsEstimated")), dec(e.get("epsActual")))
                 for e in (j or []) if (d := _date(e.get("date")))]
 
@@ -145,9 +177,12 @@ class Finnhub(Source):
     name = "finnhub"
     base_url = "https://finnhub.io/api/v1"
 
+    def _headers(self) -> dict:
+        return {"X-Finnhub-Token": self.key()}
+
     def news(self, ticker: str, since: dt.date, until: dt.date) -> list[NewsItem]:
-        j = self.get("/company-news", params={"symbol": ticker, "from": since.isoformat(), "to": until.isoformat(),
-                                              "token": self.key()})
+        j = self.get("/company-news", params={"symbol": ticker, "from": since.isoformat(), "to": until.isoformat()},
+                     headers=self._headers())
         out = []
         for n in j or []:
             ts = _stamp(n.get("datetime"))
@@ -157,12 +192,12 @@ class Finnhub(Source):
 
     def earnings(self, ticker: str, since: dt.date, until: dt.date) -> list[Earning]:
         j = self.get("/calendar/earnings", params={"symbol": ticker, "from": since.isoformat(),
-                                                   "to": until.isoformat(), "token": self.key()})
+                                                   "to": until.isoformat()}, headers=self._headers())
         return [Earning(ticker, d, dec(e.get("epsEstimate")), dec(e.get("epsActual")))
                 for e in (j.get("earningsCalendar") or []) if (d := _date(e.get("date")))]
 
     def quote(self, ticker: str) -> Quote | None:
-        q = self.get("/quote", params={"symbol": ticker, "token": self.key()})
+        q = self.get("/quote", params={"symbol": ticker}, headers=self._headers())
         ts = _stamp(q.get("t"))
         return Quote(ticker, None, None, dec(q.get("c")), ts, delayed=True) if ts and q.get("c") else None
 
@@ -173,9 +208,7 @@ class Edgar(Source):
     needs_key = False
 
     def cik(self, ticker: str) -> str | None:
-        r = self.http.get("https://www.sec.gov/files/company_tickers.json")
-        r.raise_for_status()
-        for row in r.json().values():
+        for row in self.fetch("https://www.sec.gov/files/company_tickers.json").values():
             if str(row.get("ticker", "")).upper() == ticker.upper():
                 return f"{int(row['cik_str']):010d}"
         return None
@@ -201,6 +234,7 @@ class FRED(Source):
     base_url = "https://api.stlouisfed.org/fred"
 
     def series(self, series_id: str, since: dt.date) -> list[MacroPoint]:
+        # FRED accepts its key only as a query parameter: Source.fetch keeps it out of every error text
         j = self.get("/series/observations", params={"series_id": series_id, "api_key": self.key(),
                                                      "file_type": "json", "observation_start": since.isoformat()})
         return [MacroPoint(series_id, d, dec(o.get("value")) if o.get("value") != "." else None)

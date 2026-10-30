@@ -2,6 +2,21 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.10.1] — unreleased
+
+- Fixed: a data source's key could be written into the pull log and the worker's log. A failed call's error text
+  named the whole request address, and FMP, Finnhub, Massive and FRED carried their keys in it (FMP's key reached
+  staging's pull log on 2026-10-30, the first day with real keys; those rows are masked). FMP, Finnhub and Massive
+  now get their keys in a request header. FRED accepts its key only in the address, so a failed call now records
+  only the source, the path, the status and the source's own reason, and the HTTP library's per-request log lines
+  are off.
+- FMP's free plan gives at most 5 quarters of earnings history, and not for every stock. The app now asks for 5, and
+  only for your holdings and watchlist, so FMP's 250 calls a day go to your names. The scan list keeps Finnhub's
+  earnings calendar.
+- Staging and production use the same data keys, so each now takes a fixed share of every free limit: production
+  80 %, staging 20 %. A job now waits out a full minute instead of dropping the rest of its list. A day's limit is
+  never waited for.
+
 ## [0.10.0] — unreleased
 
 - GDELT news tone now arrives. GDELT's real limit is much stricter than the "one request every 5 seconds" it
