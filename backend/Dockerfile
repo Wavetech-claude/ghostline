@@ -15,32 +15,9 @@ COPY backend/ghostline /app/backend/ghostline
 COPY backend/migrations /app/backend/migrations
 RUN pip install --no-cache-dir --no-deps /app/backend
 
+# Coolify passes the commit it builds as the build arg SOURCE_COMMIT (its build context carries no .git).
 ARG SOURCE_COMMIT=unknown
-COPY .git/HEAD /tmp/git/HEAD
-COPY .git/refs /tmp/git/refs
-COPY .git/packed-refs* /tmp/git/
-RUN python - <<'PY'
-import os, pathlib, re
-arg = os.environ.get("SOURCE_COMMIT_ARG", "")
-sha = ""
-head = pathlib.Path("/tmp/git/HEAD").read_text().strip()
-if re.fullmatch(r"[0-9a-f]{40}", head):
-    sha = head
-elif head.startswith("ref: "):
-    ref = head[5:]
-    p = pathlib.Path("/tmp/git") / ref
-    if p.is_file():
-        sha = p.read_text().strip()
-    else:
-        packed = pathlib.Path("/tmp/git/packed-refs")
-        if packed.is_file():
-            for line in packed.read_text().splitlines():
-                parts = line.split()
-                if len(parts) == 2 and parts[1] == ref:
-                    sha = parts[0]
-pathlib.Path("/app/COMMIT").write_text(sha or "unknown")
-print("commit:", sha or "unknown")
-PY
+RUN printf '%s' "$SOURCE_COMMIT" > /app/COMMIT && echo "commit: $SOURCE_COMMIT"
 ENV GHOSTLINE_COMMIT=$SOURCE_COMMIT \
     GHOSTLINE_COMMIT_FILE=/app/COMMIT \
     GHOSTLINE_VERSION_FILE=/app/VERSION \

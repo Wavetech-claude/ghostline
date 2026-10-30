@@ -54,6 +54,9 @@ def test_the_commit_comes_from_the_environment_or_the_file(monkeypatch, tmp_path
     monkeypatch.setenv("GHOSTLINE_COMMIT", "a" * 40)
     assert ghostline.commit() == "a" * 40
     monkeypatch.setenv("GHOSTLINE_COMMIT", "unknown")
+    monkeypatch.setenv("SOURCE_COMMIT", "c" * 40)        # Coolify's run-time variable
+    assert ghostline.commit() == "c" * 40
+    monkeypatch.delenv("SOURCE_COMMIT")
     f = tmp_path / "COMMIT"
     f.write_text("b" * 40)
     monkeypatch.setenv("GHOSTLINE_COMMIT_FILE", str(f))
