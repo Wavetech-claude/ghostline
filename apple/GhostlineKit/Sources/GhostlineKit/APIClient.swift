@@ -68,8 +68,10 @@ public actor APIClient {
 
     // MARK: plumbing
 
-    private func request(_ path: String, method: String, authenticated: Bool) throws -> URLRequest {
-        var r = URLRequest(url: baseURL.appending(path: path))
+    func request(_ path: String, method: String, authenticated: Bool, query: [URLQueryItem] = []) throws -> URLRequest {
+        var url = baseURL.appending(path: path)
+        if !query.isEmpty { url.append(queryItems: query) }
+        var r = URLRequest(url: url)
         r.httpMethod = method
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.timeoutInterval = 20
@@ -80,7 +82,8 @@ public actor APIClient {
         return r
     }
 
-    private func send<T: Decodable>(_ r: URLRequest, acceptErrorBodies: Bool = false) async throws -> T {
+    /// (bytes, content type) of a successful answer; the error body's `detail` on anything else.
+    func sendRaw(_ r: URLRequest, acceptErrorBodies: Bool = false) async throws -> (Data, String) {
         let data: Data
         let response: URLResponse
         do {
@@ -88,12 +91,18 @@ public actor APIClient {
         } catch {
             throw GhostlineError.transport(error.localizedDescription)
         }
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let http = response as? HTTPURLResponse
+        let code = http?.statusCode ?? 0
         if code == 401 { tokens.clear() }
         if !(200..<300).contains(code) && !acceptErrorBodies {
             let detail = (try? decoder.decode(Problem.self, from: data))?.detail ?? ""
             throw GhostlineError.http(code, detail)
         }
+        return (data, http?.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream")
+    }
+
+    func send<T: Decodable>(_ r: URLRequest, acceptErrorBodies: Bool = false) async throws -> T {
+        let (data, _) = try await sendRaw(r, acceptErrorBodies: acceptErrorBodies)
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
@@ -101,12 +110,34 @@ public actor APIClient {
         }
     }
 
-    private func get<T: Decodable>(_ path: String, authenticated: Bool, acceptErrorBodies: Bool = false) async throws -> T {
-        try await send(try request(path, method: "GET", authenticated: authenticated), acceptErrorBodies: acceptErrorBodies)
+    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], authenticated: Bool,
+                           acceptErrorBodies: Bool = false) async throws -> T {
+        try await send(try request(path, method: "GET", authenticated: authenticated, query: query),
+                       acceptErrorBodies: acceptErrorBodies)
     }
 
-    private func post<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
-        var r = try request(path, method: "POST", authenticated: authenticated)
+    func getBytes(_ path: String) async throws -> (Data, String) {
+        try await sendRaw(try request(path, method: "GET", authenticated: true))
+    }
+
+    func post<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
+        try await sendJSON(path, method: "POST", body: body, authenticated: authenticated)
+    }
+
+    func put<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
+        try await sendJSON(path, method: "PUT", body: body, authenticated: authenticated)
+    }
+
+    func postRaw<T: Decodable>(_ path: String, query: [URLQueryItem], body: Data, contentType: String) async throws -> T {
+        var r = try request(path, method: "POST", authenticated: true, query: query)
+        r.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        r.httpBody = body
+        return try await send(r)
+    }
+
+    private func sendJSON<B: Encodable, T: Decodable>(_ path: String, method: String, body: B,
+                                                      authenticated: Bool) async throws -> T {
+        var r = try request(path, method: method, authenticated: authenticated)
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = try encoder.encode(body)
         return try await send(r)

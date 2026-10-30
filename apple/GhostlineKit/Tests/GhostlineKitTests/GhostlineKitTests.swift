@@ -59,17 +59,36 @@ import Testing
     }
 }
 
-/// A URLProtocol that answers from a table, so the client is tested without a server.
+/// A URLProtocol that answers from a table per fake host, so the client is tested without a server and suites can
+/// run in parallel (each client gets its own host).
 final class FakeServer: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var answers: [String: (Int, String)] = [:]
-    nonisolated(unsafe) static var seen: [URLRequest] = []
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var tables: [String: [String: (Int, String)]] = [:]
+    nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
+
+    static func host(answers: [String: (Int, String)]) -> String {
+        let h = "\(UUID().uuidString.lowercased()).invalid"
+        lock.withLock { tables[h] = answers; requests[h] = [] }
+        return h
+    }
+
+    static func set(_ host: String, answers: [String: (Int, String)]) {
+        lock.withLock { tables[host] = answers }
+    }
+
+    static func seen(_ host: String) -> [URLRequest] {
+        lock.withLock { requests[host] ?? [] }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Self.seen.append(request)
+        let host = request.url?.host() ?? ""
         let path = request.url?.path() ?? ""
-        let (code, body) = Self.answers[path] ?? (404, #"{"detail":"Not Found"}"#)
+        let (code, body) = Self.lock.withLock {
+            Self.requests[host, default: []].append(request)
+            return Self.tables[host]?[path] ?? (404, #"{"detail":"Not Found"}"#)
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil,
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -79,60 +98,60 @@ final class FakeServer: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-@Suite(.serialized) struct APIClientTests {
-    private func client(tokens: TokenStore = InMemoryTokenStore()) -> APIClient {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.protocolClasses = [FakeServer.self]
-        FakeServer.seen = []
-        return APIClient(baseURL: URL(string: "https://example.invalid")!, tokens: tokens, session: URLSession(configuration: cfg))
-    }
+/// (client, host): a client on its own fake host with the given answers.
+func fakeClient(answers: [String: (Int, String)], tokens: TokenStore = InMemoryTokenStore()) -> (APIClient, String) {
+    let host = FakeServer.host(answers: answers)
+    let cfg = URLSessionConfiguration.ephemeral
+    cfg.protocolClasses = [FakeServer.self]
+    return (APIClient(baseURL: URL(string: "https://\(host)")!, tokens: tokens, session: URLSession(configuration: cfg)), host)
+}
 
+@Suite struct APIClientTests {
     @Test func versionIsReadWithoutASession() async throws {
-        FakeServer.answers = ["/version": (200, #"{"version":"0.1.0","commit":"abc","env":"staging"}"#)]
-        let v = try await client().version()
+        let (c, host) = fakeClient(answers: ["/version": (200, #"{"version":"0.1.0","commit":"abc","env":"staging"}"#)])
+        let v = try await c.version()
         #expect(v.version == "0.1.0")
-        #expect(FakeServer.seen.first?.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(FakeServer.seen(host).first?.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
     @Test func signInStoresTheSessionAndAccountUsesIt() async throws {
-        FakeServer.answers = ["/auth/apple": (200, #"{"session_token":"sess","expires_at":"x","sub":"001"}"#),
-                              "/account": (200, #"{"sub":"001","email_masked":"q…@example.com","created_at":"x","last_sign_in_at":null}"#)]
         let tokens = InMemoryTokenStore()
-        let c = client(tokens: tokens)
+        let (c, host) = fakeClient(answers: [
+            "/auth/apple": (200, #"{"session_token":"sess","expires_at":"x","sub":"001"}"#),
+            "/account": (200, #"{"sub":"001","email_masked":"q…@example.com","created_at":"x","last_sign_in_at":null}"#)],
+            tokens: tokens)
         let s = try await c.signIn(identityToken: "apple-token")
         #expect(s.sub == "001" && tokens.read() == "sess")
-        let sent = try #require(FakeServer.seen.first?.httpBody ?? FakeServer.seen.first?.httpBodyStream.map { _ in Data() })
-        _ = sent
         let a = try await c.account()
         #expect(a.sub == "001")
-        #expect(FakeServer.seen.last?.value(forHTTPHeaderField: "Authorization") == "Bearer sess")
+        #expect(FakeServer.seen(host).last?.value(forHTTPHeaderField: "Authorization") == "Bearer sess")
     }
 
     @Test func aRefusedSignInIsAnHttpError() async {
-        FakeServer.answers = ["/auth/apple": (401, #"{"detail":"sign-in refused"}"#)]
+        let (c, _) = fakeClient(answers: ["/auth/apple": (401, #"{"detail":"sign-in refused"}"#)])
         await #expect(throws: GhostlineError.http(401, "sign-in refused")) {
-            _ = try await client().signIn(identityToken: "x")
+            _ = try await c.signIn(identityToken: "x")
         }
     }
 
     @Test func aCallWithoutASessionNeverLeavesTheApp() async {
-        FakeServer.answers = [:]
+        let (c, host) = fakeClient(answers: [:])
         await #expect(throws: GhostlineError.notSignedIn) {
-            _ = try await client().account()
+            _ = try await c.account()
         }
-        #expect(FakeServer.seen.isEmpty)
+        #expect(FakeServer.seen(host).isEmpty)
     }
 
     @Test func a401ClearsTheSession() async {
-        FakeServer.answers = ["/account": (401, #"{"detail":"session not valid"}"#)]
         let tokens = InMemoryTokenStore(token: "old")
-        _ = try? await client(tokens: tokens).account()
+        let (c, _) = fakeClient(answers: ["/account": (401, #"{"detail":"session not valid"}"#)], tokens: tokens)
+        _ = try? await c.account()
         #expect(tokens.read() == nil)
     }
 
     @Test func healthReadsA503Body() async throws {
-        FakeServer.answers = ["/health": (503, #"{"status":"unhealthy","version":"0.1.0","commit":"abc","reason":"migrations pending: x"}"#)]
-        let h = try await client().health()
+        let (c, _) = fakeClient(answers: ["/health": (503, #"{"status":"unhealthy","version":"0.1.0","commit":"abc","reason":"migrations pending: x"}"#)])
+        let h = try await c.health()
         #expect(!h.isHealthy && h.reason == "migrations pending: x")
     }
 }
