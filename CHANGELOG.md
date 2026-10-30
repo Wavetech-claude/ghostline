@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.8.0] — unreleased
+
+- The journal and the learning loop. Every idea the scan makes is paper-traded at the next open and settled at the
+  next open after its horizon, against SPY over the same sessions, after estimated costs (10 basis points a fill, a
+  setting); put ideas settle on the premium kept against their collateral. An idea with no stored price is marked
+  unpriced, never settled on a guess. Each module's weight follows its edge over SPY, pulled toward equal weight until
+  it has 20 settled ideas, and the scan multiplies its scores by that weight. A module's ideas show as Live, and a lane
+  opens "copy with real money", only after 30 settled ideas (a setting) with a positive edge.
+- Claude writes a one-paragraph lesson per settled idea, grounded like every memo; deep dives, chat and the brief
+  read the last twenty lessons. A weekly test set (Sunday 07:00 PT) asks Claude up to twelve questions whose answers
+  are stored numbers and scores the answers. A weekly digest (Sunday 07:30 PT) is written in code from stored numbers
+  and pushed in production. A Journal screen shows all of it.
+
 ## [0.7.0] — unreleased
 
 - Invest this: any amount and a date, split across the current long-term and swing ideas (the best score takes the

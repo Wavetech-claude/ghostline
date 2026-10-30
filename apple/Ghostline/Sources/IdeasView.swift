@@ -92,6 +92,11 @@ struct IdeaCard: View {
             HStack {
                 Text(idea.ticker).font(.headline)
                 Text(idea.module.replacingOccurrences(of: "_", with: " ")).font(.caption).foregroundStyle(.secondary)
+                if idea.isLive {
+                    Text("Live").font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.green.opacity(0.18), in: .capsule).foregroundStyle(.green)
+                        .accessibilityLabel("Live: its module graduated in practice")
+                }
                 Spacer()
                 Text("\(Show.score(idea.score))").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Text(idea.status.capitalized).font(.caption)

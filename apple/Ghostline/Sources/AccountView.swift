@@ -46,6 +46,9 @@ struct AccountView: View {
                 NavigationLink { StatementsView() } label: {
                     Label("Statements", systemImage: "doc.text")
                 }
+                NavigationLink { JournalView() } label: {
+                    Label("Journal", systemImage: "book.closed")
+                }
             }
             if case .signedIn(let account) = session.state {
                 Section("Signed in") {

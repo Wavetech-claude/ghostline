@@ -28,8 +28,11 @@ public struct IdeaRow: Codable, Sendable, Equatable, Identifiable {
     public let asOf: String
     public let source: String?
     public let direction: String
+    public let live: Bool?               // its module graduated from settled paper results
+    public let laneGraduated: Bool?      // its lane may be copied with real money
 
     public var isOpen: Bool { status == "open" }
+    public var isLive: Bool { live ?? false }
 }
 
 public struct IdeaCount: Codable, Sendable, Equatable {

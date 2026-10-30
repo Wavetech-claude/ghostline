@@ -22,6 +22,13 @@ THRESHOLDS = {"canslim": 70, "vcp": 70, "pead": 65, "earnings_trade": 70, "sell_
 LANE_OF = {"canslim": "long", "vcp": "swing", "pead": "swing", "earnings_trade": "swing", "sell_puts": "puts"}
 
 
+def qualifies(s: Signal, weight: Decimal) -> bool:
+    """An actionable signal whose score, times its module's learned weight, reaches the module's threshold."""
+    if not s.actionable or s.lane not in ("long", "swing", "puts"):
+        return False
+    return Decimal(str(s.score)) * weight >= THRESHOLDS.get(s.module, 101)
+
+
 def _q(x: float | None, places: str = "0.0001") -> Decimal | None:
     return None if x is None else Decimal(str(x)).quantize(Decimal(places))
 
@@ -78,6 +85,8 @@ class Scan:
     # ── the scan ──
     def run(self) -> dict[str, Any]:
         spy = self.bars("SPY")
+        rows = self.db.fetch_all("SELECT module, weight FROM module_weights")
+        weights = {r["module"]: Decimal(r["weight"]) for r in rows}
         etf_bars = {t: self.bars(t) for t in macro_regime.ETFS}
         out = {"day": self.today.isoformat(), "tickers": 0, "signals": 0, "ideas": 0, "refused": 0, "skipped": []}
         self.save(macro_regime.signal(etf_bars, self.macro()))
@@ -113,9 +122,11 @@ class Scan:
             for s in signals:
                 if s is None:
                     continue
+                weight = weights.get(s.module, Decimal(1))   # the learning loop's weight; 1 until settled
+                s.evidence["module_weight"] = str(weight)
                 sid = self.save(s)
                 out["signals"] += 1
-                if s.actionable and s.score >= THRESHOLDS.get(s.module, 101) and s.lane in ("long", "swing", "puts"):
+                if qualifies(s, weight):
                     made = self.idea(sid, s)
                     out["ideas" if made["status"] == "open" else "refused"] += 1
             if len(out["skipped"]) > 200:
