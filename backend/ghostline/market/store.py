@@ -125,6 +125,28 @@ def tracked_tickers(db: Database) -> list[str]:
     return [r["ticker"] for r in rows]
 
 
+MARKET_TICKERS = ("SPY", "RSP", "IWM", "HYG", "LQD", "TLT", "XLY", "XLP")   # the regime's ratios and the ghost's SPY
+
+
+def scan_tickers(db: Database) -> list[str]:
+    """What the daily bars and earnings pulls cover: the tracked tickers, the market ETFs, and today's universe."""
+    rows = db.fetch_all("SELECT ticker FROM scan_universe WHERE day >= CURRENT_DATE - 1")
+    found = set(tracked_tickers(db)) | set(MARKET_TICKERS) | {r["ticker"] for r in rows}
+    return sorted(found)
+
+
+def save_universe(db: Database, day: dt.date, rows: list[dict]) -> int:
+    n = 0
+    with db.connection() as conn:
+        for r in rows:
+            conn.execute("INSERT INTO scan_universe (ticker, day, reason, dollar_volume, change_pct) "
+                         "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (ticker, day) DO NOTHING",
+                         (r["ticker"], day, r["reason"], r.get("dollar_volume"), r.get("change_pct")))
+            n += 1
+        conn.commit()
+    return n
+
+
 def tracked_option_symbols(db: Database) -> list[str]:
     """Every option with an open short leg or an open practice order: its quote is pulled with the stocks' (Tradier
     quotes option symbols; Alpaca does not)."""

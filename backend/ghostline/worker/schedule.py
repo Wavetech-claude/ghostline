@@ -7,6 +7,7 @@ from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 
 from ghostline.db import Database
+from ghostline.ideas import Scan
 from ghostline.market.jobs import Jobs
 from ghostline.practice import Practice
 
@@ -17,11 +18,19 @@ def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: P
     """Add every job; returns their ids (tests read them). Each job is misfire-tolerant and never overlaps itself."""
     j = jobs or Jobs(db)
     p = practice or Practice(db)
+    def scan_ideas() -> dict:
+        s = Scan(db)
+        out = s.run()
+        out["expired"] = s.expire()
+        return out
+
     plan = [
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
+        ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
         ("pull_news_earnings", j.pull_news_earnings, CronTrigger(hour=6, minute=0, timezone=PT)),
         ("pull_fundamentals", j.pull_fundamentals, CronTrigger(hour=6, minute=10, timezone=PT)),
+        ("scan_ideas", scan_ideas, CronTrigger(day_of_week="mon-fri", hour=6, minute=20, timezone=PT)),
         ("pull_quotes", j.pull_quotes, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="0,30", timezone=PT)),
         # practice: fill open orders on the fresh quotes, then close the session (day orders, settlement, expiries)
         ("fill_orders", p.fill_open_orders,

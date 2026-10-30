@@ -11,7 +11,7 @@ import httpx
 from ghostline.db import Database
 from ghostline.market import NotConfigured, RateLimited, store, utcnow
 from ghostline.market.limits import Limiter
-from ghostline.market.sources import ALL, FMP, FRED, Alpaca, Edgar, Finnhub, Tradier
+from ghostline.market.sources import ALL, FMP, FRED, Alpaca, Edgar, Finnhub, Massive, Tradier
 
 logger = logging.getLogger("ghostline.jobs")
 
@@ -48,7 +48,7 @@ class Jobs:
         out = {"tickers": 0, "bars": 0}
         end = dt.date.today()
         start = end - dt.timedelta(days=days)
-        for ticker in store.tracked_tickers(self.db):
+        for ticker in store.scan_tickers(self.db):
             bars = self._call("alpaca", "bars", alpaca.bars, ticker, start, end)
             if bars:
                 out["bars"] += store.save_bars(self.db, ticker, "1D", bars, "alpaca", utcnow())
@@ -75,10 +75,10 @@ class Jobs:
         edgar: Edgar = self.sources["edgar"]
         today = dt.date.today()
         out = {"news": 0, "earnings": 0, "filings": 0}
-        for ticker in store.tracked_tickers(self.db):
-            news = self._call("finnhub", "company-news", finnhub.news, ticker, today - dt.timedelta(days=14), today)
-            if news:
-                out["news"] += store.save_news(self.db, news, "finnhub", utcnow())
+        tracked = set(store.tracked_tickers(self.db))
+        for ticker in store.scan_tickers(self.db):
+            if ticker in store.MARKET_TICKERS:
+                continue
             cal = self._call("finnhub", "calendar/earnings", finnhub.earnings, ticker, today - dt.timedelta(days=90),
                              today + dt.timedelta(days=120))
             if cal:
@@ -86,10 +86,38 @@ class Jobs:
             hist = self._call("fmp", "earnings", fmp.earnings, ticker)
             if hist:
                 out["earnings"] += store.save_earnings(self.db, hist, "fmp", utcnow())
+            if ticker not in tracked:
+                continue          # news and filings only for what the owner holds or watches
+            news = self._call("finnhub", "company-news", finnhub.news, ticker, today - dt.timedelta(days=14), today)
+            if news:
+                out["news"] += store.save_news(self.db, news, "finnhub", utcnow())
             filings = self._call("edgar", "submissions", edgar.filings, ticker)
             if filings:
                 out["filings"] += store.save_filings(self.db, filings, "edgar", utcnow())
         return out
+
+    def build_universe(self, day: dt.date | None = None, size: int = 50) -> dict:
+        """One Massive grouped-daily pull of the whole market: the most traded names (by dollar volume) above $10
+        that moved at least 2% that day become today's scan universe, beside the tracked tickers."""
+        massive: Massive = self.sources["massive"]
+        day = day or (dt.date.today() - dt.timedelta(days=1))
+        while day.weekday() >= 5:
+            day -= dt.timedelta(days=1)
+        grouped = self._call("massive", "grouped-daily", massive.grouped_daily, day)
+        if not grouped:
+            return {"universe": 0, "reason": "no grouped pull"}
+        rows = []
+        for ticker, bar in grouped.items():
+            if not ticker.isalpha() or len(ticker) > 5 or bar.close < 10 or bar.open <= 0:
+                continue
+            change = float((bar.close / bar.open - 1) * 100)
+            if abs(change) < 2:
+                continue
+            rows.append({"ticker": ticker, "reason": "movers", "dollar_volume": bar.close * bar.volume,
+                         "change_pct": round(change, 4)})
+        rows.sort(key=lambda r: -r["dollar_volume"])
+        n = store.save_universe(self.db, dt.date.today(), rows[:size])
+        return {"universe": n, "day": day.isoformat()}
 
     def pull_macro(self) -> dict:
         fred: FRED = self.sources["fred"]
@@ -107,8 +135,9 @@ class Jobs:
         for ticker in store.tracked_tickers(self.db):
             profile = self._call("fmp", "profile", fmp.profile, ticker)
             ratios = self._call("fmp", "ratios-ttm", fmp.ratios, ticker)
-            if profile or ratios:
-                payload = {"profile": profile or {}, "ratios": ratios or {}}
+            income = self._call("fmp", "income-statement", fmp.income_annual, ticker)
+            if profile or ratios or income:
+                payload = {"profile": profile or {}, "ratios": ratios or {}, "income_annual": income or []}
                 store.save_fundamentals(self.db, ticker, payload, "fmp", utcnow())
                 out["tickers"] += 1
         return out

@@ -128,6 +128,13 @@ class FMP(Source):
         j = self.get("/ratios-ttm", params={"symbol": ticker, "apikey": self.key()})
         return (j[0] if isinstance(j, list) and j else j) or {}
 
+    def income_annual(self, ticker: str, limit: int = 5) -> list[dict]:
+        """Annual EPS and revenue, newest first (CANSLIM's A)."""
+        j = self.get("/income-statement", params={"symbol": ticker, "period": "annual", "limit": limit,
+                                                  "apikey": self.key()})
+        return [{"date": r.get("date"), "eps": r.get("eps"), "revenue": r.get("revenue")} for r in (j or [])
+                if isinstance(r, dict)]
+
     def earnings(self, ticker: str) -> list[Earning]:
         j = self.get("/earnings", params={"symbol": ticker, "apikey": self.key(), "limit": 12})
         return [Earning(ticker, d, dec(e.get("epsEstimated")), dec(e.get("epsActual")))
