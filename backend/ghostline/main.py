@@ -19,6 +19,7 @@ from ghostline.routes import auth as auth_routes
 from ghostline.routes import devices as devices_routes
 from ghostline.routes import ledger as ledger_routes
 from ghostline.routes import market as market_routes
+from ghostline.routes import practice as practice_routes
 from ghostline.routes import risk as risk_routes
 
 logger = logging.getLogger("ghostline")
@@ -56,6 +57,7 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
     app.include_router(risk_routes.router)
     app.include_router(attachments_routes.router)
     app.include_router(market_routes.router)
+    app.include_router(practice_routes.router)
 
     @app.get("/version")
     def version() -> dict:

@@ -25,6 +25,11 @@ struct AccountView: View {
                     if let error = ledger.error { Text(error).foregroundStyle(.secondary) } else { ProgressView() }
                 }
             }
+            Section("Practice") {
+                NavigationLink { PracticeAccountView() } label: {
+                    Label("Practice Account", systemImage: "gamecontroller")
+                }
+            }
             if case .signedIn(let account) = session.state {
                 Section("Signed in") {
                     LabeledContent("Apple ID", value: account.emailMasked.isEmpty ? "hidden" : account.emailMasked)
