@@ -22,10 +22,12 @@ __version__ = _read_version()
 
 
 def commit() -> str:
-    """The commit the running image was built from: GHOSTLINE_COMMIT (set by the Dockerfile), else /app/COMMIT."""
-    env = os.environ.get("GHOSTLINE_COMMIT", "").strip()
-    if env and env != "unknown":
-        return env
+    """The commit the running image serves: GHOSTLINE_COMMIT, else SOURCE_COMMIT (Coolify sets it on the container at
+    run time; its build passes no commit), else /app/COMMIT."""
+    for name in ("GHOSTLINE_COMMIT", "SOURCE_COMMIT"):
+        env = os.environ.get(name, "").strip()
+        if env and env != "unknown":
+            return env
     p = Path(os.environ.get("GHOSTLINE_COMMIT_FILE", "/app/COMMIT"))
     if p.is_file():
         text = p.read_text(encoding="utf-8").strip()
