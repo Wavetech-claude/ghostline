@@ -28,9 +28,12 @@ def _row(r: dict) -> dict:
     return out
 
 
+# live: the idea's module has graduated from settled paper results; lane_graduated: its lane may be copied for real
 _IDEA_SQL = (
-    "SELECT i.*, s.score, s.reason, s.horizon_days, s.as_of, s.source, s.direction FROM ideas i "
-    "JOIN signals s ON s.id = i.signal_id"
+    "SELECT i.*, s.score, s.reason, s.horizon_days, s.as_of, s.source, s.direction, "
+    "COALESCE(mw.graduated, false) AS live, COALESCE(lg.graduated, false) AS lane_graduated FROM ideas i "
+    "JOIN signals s ON s.id = i.signal_id LEFT JOIN module_weights mw ON mw.module = i.module "
+    "LEFT JOIN lane_graduation lg ON lg.lane = i.lane"
 )
 
 

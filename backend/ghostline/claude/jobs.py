@@ -12,8 +12,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from ghostline.claude import evaluate, grounding, prompts, push, runner
 from ghostline.claude import facts as F
-from ghostline.claude import grounding, prompts, push, runner
 from ghostline.claude.tracing import Tracer
 from ghostline.config import Settings
 from ghostline.db import Database
@@ -95,6 +95,8 @@ class Jobs:
                 "chat": self.chat,
                 "brief": self.brief,
                 "read_attachment": self.read_attachment,
+                "lesson": self.lesson,
+                "eval": self.eval,
             }[row["kind"]](row["id"], payload, trace_id)
             self.db.execute(
                 "UPDATE claude_jobs SET status = 'done', result = %s::jsonb, trace_id = %s, finished_at = now() "
@@ -305,7 +307,7 @@ class Jobs:
     def read_attachment(self, job_id: int, payload: dict, trace_id: str) -> dict:
         if self.storage is None:
             raise RuntimeError("no object store")
-        if payload.get("object_key"):        # a confirmation read before its trade exists (the form's pre-fill)
+        if payload.get("object_key"):  # a confirmation read before its trade exists (the form's pre-fill)
             att = {"object_key": payload["object_key"], "content_type": payload.get("content_type") or ""}
         else:
             att = self.db.fetch_one(
@@ -334,14 +336,81 @@ class Jobs:
                 max_turns=3,
                 cwd=d,
             )
-        if payload.get("object_key"):        # the inbox copy is not kept: the form attaches the file on save
+        if payload.get("object_key"):  # the inbox copy is not kept: the form attaches the file on save
             try:
                 self.storage.delete(payload["object_key"])
             except Exception as exc:  # noqa: BLE001 — a leftover inbox object is logged, never fatal
                 logger.warning("inbox object %s not deleted: %s", payload["object_key"], type(exc).__name__)
         fields = _memo(text)
-        return {"attachment_id": payload.get("attachment_id"), "object_key": payload.get("object_key"),
-                "fields": fields}
+        return {
+            "attachment_id": payload.get("attachment_id"),
+            "object_key": payload.get("object_key"),
+            "fields": fields,
+        }
+
+    # ── a lesson per settled idea ──
+    def lesson(self, job_id: int, payload: dict, trace_id: str) -> dict:
+        idea_id = int(payload["idea_id"])
+        row = self.db.fetch_one(
+            "SELECT i.id, i.ticker, i.lane, i.module, i.entry AS idea_entry, i.stop, i.target, i.option_symbol, "
+            "s.reason, s.score, s.evidence, p.opened_on, p.closes_on, p.entry, p.exit, p.entry_date, p.exit_date, "
+            "p.result_pct, p.spy_pct, p.costs_pct, p.excess_pct, p.note FROM ideas i "
+            "JOIN signals s ON s.id = i.signal_id "
+            "JOIN paper_results p ON p.idea_id = i.id WHERE i.id = %s AND p.status = 'settled'",
+            (idea_id,),
+        )
+        if not row:
+            raise RuntimeError(f"idea {idea_id} is not settled")
+        evidence = row.pop("evidence")
+        evidence = evidence if isinstance(evidence, dict) else json.loads(evidence or "{}")
+        prior = self.db.fetch_all(
+            "SELECT ticker, text, created_at FROM lessons WHERE module = %s ORDER BY id DESC LIMIT 5", (row["module"],)
+        )
+        facts = {
+            "idea": F._j(row),
+            "evidence": F._j({k: v for k, v in evidence.items() if k != "components"}),
+            "prior_lessons": F._j(prior),
+        }
+        text = self.call(
+            prompts.load("lesson", module=row["module"], facts=json.dumps(facts, indent=1, default=str)),
+            self.settings.claude_model,
+            trace_id,
+            "lesson",
+        )
+        text, struck = grounding.ground(text.strip(), facts)
+        self.db.execute(
+            "INSERT INTO lessons (idea_id, ticker, module, text, grounded, trace_id, job_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (idea_id) DO NOTHING",
+            (idea_id, row["ticker"], row["module"], text, not struck, trace_id, job_id),
+        )
+        return {"idea_id": idea_id, "grounded": not struck, "struck": struck}
+
+    # ── the weekly test set ──
+    def eval(self, job_id: int, payload: dict, trace_id: str) -> dict:
+        qs, facts = evaluate.questions(self.db)
+        if not qs:
+            raise RuntimeError("no stored data to ask about yet")
+        listing = "\n".join(f"{q['n']}. {q['question']}" for q in qs)
+        text = self.call(
+            prompts.load("eval", facts=json.dumps(facts, indent=1, default=str), questions=listing),
+            self.settings.claude_model,
+            trace_id,
+            "eval",
+        )
+        got = _memo(text).get("answers") or []
+        answers = {int(a.get("n")): str(a.get("answer") or "") for a in got if isinstance(a, dict) and a.get("n")}
+        result = evaluate.score(qs, answers)
+        self.db.execute(
+            "INSERT INTO eval_runs (questions, correct, score_pct, results, job_id) VALUES (%s, %s, %s, %s::jsonb, %s)",
+            (
+                result["questions"],
+                result["correct"],
+                result["score_pct"],
+                json.dumps(result["results"], default=str),
+                job_id,
+            ),
+        )
+        return {"questions": result["questions"], "correct": result["correct"], "score_pct": str(result["score_pct"])}
 
 
 def _memo(text: str) -> dict:

@@ -47,3 +47,18 @@ import Testing
         #expect(FakeServer.seen(host).first?.url?.query() == "book=practice&month=2026-10&format=csv")
     }
 }
+
+@Suite struct JournalModelTests {
+    @Test func decodesTheJournalWithAGraduatedLane() throws {
+        let json = #"""
+        {"counts":{"pending":2,"settled":5,"unpriced":0},"settings":{"graduation_n":"5.000000","cost_bps_per_side":"10.000000","weight_full_n":"20.000000"},
+         "modules":[{"module":"vcp","n":5,"wins":5,"expectancy":"3.8000","weight":"1.1900","graduated":true,"updated_at":"x"}],
+         "lanes":[{"lane":"swing","settled_n":5,"expectancy":"3.8000","positive_expectancy":true,"graduated":true,"updated_at":"x"}],
+         "recent":[{"idea_id":1,"ticker":"T0","lane":"swing","module":"vcp","opened_on":"2026-09-01","closes_on":"2026-09-11","status":"settled",
+                    "entry":"100.0000","exit":"105.0000","result_pct":"4.8000","spy_pct":"0.0000","excess_pct":"4.8000","note":null}],
+         "last_eval":{"id":1,"questions":8,"correct":2,"score_pct":"25.00","at":"x"},"digest":null}
+        """#
+        let j = try GhostlineJSON.decoder().decode(Journal.self, from: Data(json.utf8))
+        #expect(j.graduationN == 5 && j.lanes[0].graduated && j.modules[0].graduated && j.lastEval?.correct == 2 && j.digest == nil)
+    }
+}

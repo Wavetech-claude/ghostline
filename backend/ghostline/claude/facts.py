@@ -168,6 +168,7 @@ def ticker_facts(db: Database, ticker: str) -> dict[str, Any]:
                 "cap_20pct": str(cap),
             }
     out["sizing"] = sizing
+    out["lessons"] = lessons(db)
     return out
 
 
@@ -230,6 +231,7 @@ def brief_facts(db: Database) -> dict[str, Any]:
     )
     book = "real" if p.facts(p.book_id("real")).equity > 0 else "practice"
     f = p.facts(p.book_id(book))
+    out["lessons"] = lessons(db)
     out["account"] = {
         "book": book,
         "equity": str(f.equity),
@@ -237,3 +239,9 @@ def brief_facts(db: Database) -> dict[str, Any]:
         "open_positions": f.open_positions,
     }
     return out
+
+
+def lessons(db: Database, limit: int = 20) -> list[dict[str, Any]]:
+    """The last lessons the journal wrote (the spec: future prompts read the recent lessons)."""
+    rows = db.fetch_all("SELECT module, ticker, text, created_at FROM lessons ORDER BY id DESC LIMIT %s", (limit,))
+    return _j(rows)
