@@ -119,12 +119,15 @@ jobs:
           bash scripts/ci/docs-only.sh "$base" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
+      # The image's default Xcode (26.x on macos-26) ships its simulator runtimes; another Xcode on the image may not
+      # (the first run selected Xcode_26.1 and iOS 26.1's platform was not installed there).
       - name: Xcode
         if: steps.scope.outputs.docs_only != 'true'
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.1.app 2>/dev/null || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          xcode-select -p
           xcodebuild -version
           swift --version
+          xcrun simctl list runtimes available
 
       - name: XcodeGen
         if: steps.scope.outputs.docs_only != 'true'
@@ -144,7 +147,13 @@ jobs:
         if: steps.scope.outputs.docs_only != 'true'
         working-directory: apple
         run: |
-          dest="$(xcrun simctl list devices available | grep -m1 -oE 'iPhone 1[0-9][^(]*' | sed 's/ *$//')"
+          dest="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          names = [d["name"] for rt, ds in sorted(data.items(), reverse=True) if "iOS" in rt for d in ds
+                   if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          print(names[0] if names else "")')"
+          [ -n "$dest" ] || { echo "::error::no available iPhone simulator"; xcrun simctl list devices available; exit 1; }
           echo "destination: $dest"
           xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Debug \
             -destination "platform=iOS Simulator,name=$dest" CODE_SIGNING_ALLOWED=NO \
