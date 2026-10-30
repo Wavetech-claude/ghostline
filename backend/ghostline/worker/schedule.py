@@ -34,9 +34,9 @@ def register(
     claude: ClaudeJobs | None = None,
 ) -> list[str]:
     """Add every job; returns their ids (tests read them). Each job is misfire-tolerant and never overlaps itself."""
-    j = jobs or Jobs(db)
-    p = practice or Practice(db)
     settings = settings or load()
+    j = jobs or Jobs(db, env=settings.ghostline_env)
+    p = practice or Practice(db)
     c = claude or ClaudeJobs(db, settings, storage.for_settings(settings))
 
     def claude_poll() -> dict | None:

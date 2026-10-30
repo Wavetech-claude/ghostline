@@ -16,6 +16,11 @@ class RateLimited(Exception):
     """The source's free-tier counter is at its limit for this window."""
 
 
+class SourceError(Exception):
+    """A source answered with an error, or could not be reached. The text names the source, the path, the status and
+    the source's own short reason; it never carries the request's query, where FRED's key travels."""
+
+
 @dataclass(frozen=True)
 class Bar:
     ts: dt.datetime
