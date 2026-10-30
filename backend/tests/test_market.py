@@ -13,7 +13,7 @@ from ghostline.config import Settings
 from ghostline.db import Database
 from ghostline.market import NotConfigured, RateLimited, store
 from ghostline.market.jobs import Jobs
-from ghostline.market.limits import LIMITS, Limiter
+from ghostline.market.limits import Limiter
 from ghostline.market.sources import FMP, FRED, Alpaca, Edgar, Finnhub, Massive, Tradier, configured
 from tests.conftest import settings, sign_in
 
@@ -188,7 +188,7 @@ def test_the_worker_registers_the_plans_schedule(fresh_db):
     from ghostline.worker import schedule
     db = Database(settings())
     sch = BackgroundScheduler(timezone="America/Los_Angeles")
-    ids = schedule.register(sch, db)
+    ids = schedule.register(sch, db, settings=settings())     # an unnamed environment reads as staging
     assert ids == ["pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
     quotes = sch.get_job("pull_quotes")
     assert "day_of_week='mon-fri'" in str(quotes.trigger) and "hour='6-13'" in str(quotes.trigger)
@@ -320,18 +320,18 @@ def test_the_macro_pull_no_longer_calls_gdelt(fresh_db, keys):
     db.close()
 
 
-def test_staging_and_production_ask_gdelt_at_different_minutes(fresh_db):
+def test_staging_registers_no_pull_job_and_production_registers_every_one(fresh_db):
+    """Staging reads production's nightly copy: it never spends a key's free limit (the owner's ruling, 2026-10-30)."""
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from ghostline.worker import schedule
     db = Database(settings())
-    minutes = {}
+    ids = {}
     for env in ("staging", "prod"):
-        sch = BackgroundScheduler(timezone="America/Los_Angeles")
-        schedule.register(sch, db, settings=settings(GHOSTLINE_ENV=env))
-        minutes[env] = str(sch.get_job("pull_tone").trigger)
-    assert "minute='15,45'" in minutes["staging"] and "minute='0,30'" in minutes["prod"]
-    assert "hour='0-4'" in minutes["prod"]                         # every run lands before the 05:30 brief
+        ids[env] = schedule.register(BackgroundScheduler(timezone="America/Los_Angeles"), db,
+                                     settings=settings(GHOSTLINE_ENV=env))
+    assert set(schedule.PULLS) <= set(ids["prod"]) and not set(schedule.PULLS) & set(ids["staging"])
+    assert set(ids["prod"]) - set(ids["staging"]) == set(schedule.PULLS)     # everything else runs on both
     db.close()
 
 
@@ -410,19 +410,6 @@ def test_fmp_history_is_asked_only_for_the_owners_names(fresh_db, keys):
     db.close()
 
 
-def test_each_environment_takes_its_share_and_the_two_stay_inside_the_limit(fresh_db):
-    db = Database(settings())
-    prod, staging = Limiter(db, "prod"), Limiter(db, "staging")
-    assert prod.limits("fmp") == (None, 200) and staging.limits("fmp") == (None, 50)
-    assert prod.limits("finnhub") == (48, None) and staging.limits("finnhub") == (12, None)
-    for source, pair in LIMITS.items():
-        for i, limit in enumerate(pair):
-            if limit and limit > 1:         # a limit of 1 cannot be split (GDELT: different minutes instead)
-                assert prod.limits(source)[i] + staging.limits(source)[i] <= limit, source
-    assert Limiter(db, "test").limits("fmp") == (None, 250)
-    db.close()
-
-
 def test_a_job_waits_out_a_full_minute_but_never_a_full_day(fresh_db):
     db = Database(settings())
     slept = []
@@ -430,14 +417,14 @@ def test_a_job_waits_out_a_full_minute_but_never_a_full_day(fresh_db):
     def sleep(seconds: float) -> None:      # time passes: every counted call moves a minute into the past
         slept.append(seconds)
         db.execute("UPDATE data_pulls SET at = at - interval '61 seconds'")
-    lim = Limiter(db, "staging", sleep=sleep)
-    for _ in range(12):
+    lim = Limiter(db, sleep=sleep)
+    for _ in range(60):
         lim.record("finnhub", "calendar/earnings", "ok", rows=1)
     with pytest.raises(RateLimited):
         lim.check("finnhub")                # a request from the app never waits
     lim.check("finnhub", wait=True)         # a job waits until the oldest call leaves the minute
     assert len(slept) == 1 and 0 < slept[0] <= 61
-    for _ in range(50):
+    for _ in range(250):
         lim.record("fmp", "profile", "ok", rows=1)
     with pytest.raises(RateLimited, match="a day"):
         lim.check("fmp", wait=True)

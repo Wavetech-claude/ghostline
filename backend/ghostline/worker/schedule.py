@@ -1,5 +1,9 @@
 """The worker's schedules, Pacific time (the plan): macro and the pre-market scan around 05:30, holdings checks every
-30 minutes while the market is open, settlement and lessons after the 13:00 close, a weekly digest on Sunday."""
+30 minutes while the market is open, settlement and lessons after the 13:00 close, a weekly digest on Sunday.
+
+Only production pulls market data. Staging reads production's database, copied over staging's every night by a host
+job on the prod VM (homelab_skills infra/ghostline-staging-refresh; the owner's ruling, 2026-10-30: one set of keys,
+pulled once), so staging registers no pull job."""
 
 from __future__ import annotations
 
@@ -25,6 +29,9 @@ from ghostline.market.jobs import Jobs
 from ghostline.practice import Practice
 
 PT = "America/Los_Angeles"
+# every job that calls a data source; staging has none of them (see the module's docstring)
+PULLS = ("pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings",
+         "pull_fundamentals", "pull_chains", "pull_quotes")
 
 
 def register(
@@ -37,7 +44,7 @@ def register(
 ) -> list[str]:
     """Add every job; returns their ids (tests read them). Each job is misfire-tolerant and never overlaps itself."""
     settings = settings or load()
-    j = jobs or Jobs(db, env=settings.ghostline_env)
+    j = jobs or Jobs(db)
     p = practice or Practice(db)
     c = claude or ClaudeJobs(db, settings, storage.for_settings(settings))
 
@@ -86,9 +93,7 @@ def register(
     plan = [
         ("pull_calendar", j.pull_calendar, CronTrigger(hour=4, minute=50, timezone=PT)),
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
-        # GDELT sees staging and production as one address (both run on prod): they ask at different minutes
-        ("pull_tone", j.pull_tone,
-         CronTrigger(hour="0-4", minute="15,45" if settings.ghostline_env == "staging" else "0,30", timezone=PT)),
+        ("pull_tone", j.pull_tone, CronTrigger(hour="0-4", minute="0,30", timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
         ("pull_news_earnings", j.pull_news_earnings, CronTrigger(hour=6, minute=0, timezone=PT)),
@@ -120,6 +125,8 @@ def register(
         ("weekly_eval", weekly_eval, CronTrigger(day_of_week="sun", hour=7, minute=0, timezone=PT)),
         ("weekly_digest", digest_and_push, CronTrigger(day_of_week="sun", hour=7, minute=30, timezone=PT)),
     ]
+    if settings.ghostline_env == "staging":
+        plan = [p for p in plan if p[0] not in PULLS]
     for job_id, fn, trigger in plan:
         if "day_of_week='mon-fri'" in str(trigger):
             fn = on_sessions(db, fn)
