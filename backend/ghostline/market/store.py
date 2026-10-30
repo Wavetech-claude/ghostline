@@ -149,6 +149,47 @@ def save_universe(db: Database, day: dt.date, rows: list[dict]) -> int:
     return n
 
 
+def save_chain(db: Database, raw: list[dict], as_of: dt.datetime) -> list[dict]:
+    """Parse a Tradier chain, store every option with its bid, ask, open interest, IV and delta, and keep each
+    option's bid and ask as its quote (a practice order fills against it). Returns the parsed rows."""
+    from ghostline import occ  # late: occ has no dependency on the store
+    from ghostline.market import dec
+
+    rows: list[dict] = []
+    for o in raw or []:
+        try:
+            parsed = occ.parse(str(o.get("symbol") or ""))
+        except ValueError:
+            continue
+        greeks = o.get("greeks") or {}
+        rows.append({"option_symbol": parsed.symbol, "underlying": parsed.underlying, "expiry": parsed.expiry,
+                     "strike": parsed.strike, "kind": parsed.kind, "bid": dec(o.get("bid")), "ask": dec(o.get("ask")),
+                     "last": dec(o.get("last")), "volume": dec(o.get("volume")),
+                     "open_interest": dec(o.get("open_interest")),
+                     "iv": dec(greeks.get("mid_iv") or greeks.get("smv_vol")), "delta": dec(greeks.get("delta"))})
+    if rows:
+        with db.connection() as conn:
+            for r in rows:
+                conn.execute("INSERT INTO option_chains (option_symbol, underlying, expiry, strike, kind, bid, ask, "
+                             "last, volume, open_interest, iv, delta, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, "
+                             "%s, %s, %s, %s, %s, %s, 'tradier', %s) ON CONFLICT DO NOTHING",
+                             (r["option_symbol"], r["underlying"], r["expiry"], r["strike"], r["kind"], r["bid"],
+                              r["ask"], r["last"], r["volume"], r["open_interest"], r["iv"], r["delta"], as_of))
+            conn.commit()
+        save_quotes(db, [Quote(r["option_symbol"], r["bid"], r["ask"], r["last"], as_of, True) for r in rows],
+                    "tradier", as_of)
+    return rows
+
+
+def put_candidates(db: Database) -> list[str]:
+    """Stocks the owner would happily own (the requirements' rule for selling puts): what the owner holds or
+    watches, and the tickers of open long-term ideas."""
+    rows = db.fetch_all("SELECT ticker FROM positions UNION SELECT ticker FROM watchlist UNION "
+                        "SELECT ticker FROM ideas WHERE lane = 'long' AND status = 'open' AND expires_at > now() "
+                        "ORDER BY 1")
+    return [r["ticker"] for r in rows if r["ticker"] not in MARKET_TICKERS]
+
+
 def tracked_option_symbols(db: Database) -> list[str]:
     """Every option with an open short leg or an open practice order: its quote is pulled with the stocks' (Tradier
     quotes option symbols; Alpaca does not)."""

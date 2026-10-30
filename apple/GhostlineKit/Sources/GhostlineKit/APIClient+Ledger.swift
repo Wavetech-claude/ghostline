@@ -37,6 +37,15 @@ public extension APIClient {
         try await get("/portfolio", authenticated: true)
     }
 
+    func position(book: String, ticker: String) async throws -> PositionDetail {
+        try await get("/positions/\(book)/\(ticker)", authenticated: true)
+    }
+
+    /// A book's value each weekday, its time-weighted return, and SPY's return over the same days.
+    func series(book: String) async throws -> BookSeries {
+        try await get("/series", query: [URLQueryItem(name: "book", value: book)], authenticated: true)
+    }
+
     func riskRules() async throws -> RiskRules {
         try await get("/risk-rules", authenticated: true)
     }

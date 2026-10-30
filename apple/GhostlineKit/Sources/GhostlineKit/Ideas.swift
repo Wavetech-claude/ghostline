@@ -151,6 +151,11 @@ public extension APIClient {
         try await get("/ideas/\(id)", authenticated: true)
     }
 
+    /// The same answer read as a list row, so a trade in the history can open the idea screen.
+    func ideaRow(id: Int) async throws -> IdeaRow {
+        try await get("/ideas/\(id)", authenticated: true)
+    }
+
     func signals(ticker: String) async throws -> [SignalRow] {
         struct Answer: Decodable { let signals: [SignalRow] }
         return try await (get("/signals", query: [URLQueryItem(name: "ticker", value: ticker)], authenticated: true) as Answer).signals

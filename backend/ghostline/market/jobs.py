@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -11,16 +12,22 @@ import httpx
 from ghostline.db import Database
 from ghostline.market import NotConfigured, RateLimited, store, utcnow
 from ghostline.market.limits import Limiter
-from ghostline.market.sources import ALL, FMP, FRED, Alpaca, Edgar, Finnhub, Massive, Tradier
+from ghostline.market.sources import ALL, FMP, FRED, GDELT, Alpaca, Edgar, Finnhub, Massive, Tradier
 
 logger = logging.getLogger("ghostline.jobs")
 
 MACRO_SERIES = ("DGS10", "DGS2", "CPIAUCSL", "DEXINUS", "UNRATE", "FEDFUNDS")   # rates, CPI, USD/INR, jobs, policy
+# GDELT world news tone for the brief's backdrop (no key; one request every 5 seconds, its own published limit)
+TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
+GDELT_SPACING_S = 6
+PUT_DTE = (30, 45)
 
 
 class Jobs:
-    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None) -> None:
+    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None,
+                 sleep=time.sleep) -> None:
         self.db = db
+        self.sleep = sleep
         self.limiter = Limiter(db)
         self.sources = sources or {name: cls(http) for name, cls in ALL.items()}
 
@@ -121,12 +128,40 @@ class Jobs:
 
     def pull_macro(self) -> dict:
         fred: FRED = self.sources["fred"]
-        out = {"points": 0}
+        out = {"points": 0, "tone_points": 0}
         since = dt.date.today() - dt.timedelta(days=5 * 365)
         for series in MACRO_SERIES:
             pts = self._call("fred", f"series/{series}", fred.series, series, since)
             if pts:
                 out["points"] += store.save_macro(self.db, pts, "fred", utcnow())
+        gdelt: GDELT = self.sources["gdelt"]
+        for i, q in enumerate(TONE_QUERIES):
+            if i:
+                self.sleep(GDELT_SPACING_S)
+            pts = self._call("gdelt", "timelinetone", gdelt.tone, q, 7)
+            if pts:
+                out["tone_points"] += store.save_macro(self.db, pts, "gdelt", utcnow())
+        return out
+
+    def pull_chains(self) -> dict:
+        """Before the scan: for every stock the owner would happily own, the expiry 30 to 45 days out nearest 38
+        days, its whole chain stored. The sell-puts module reads only stored chains."""
+        tradier: Tradier = self.sources["tradier"]
+        today = dt.date.today()
+        out: dict[str, Any] = {"tickers": 0, "options": 0, "no_expiry": []}
+        for ticker in store.put_candidates(self.db):
+            dates = self._call("tradier", "expirations", tradier.expirations, ticker)
+            if dates is None:
+                break                          # not configured or limited: the next tickers would be refused too
+            fits = [d for d in dates if PUT_DTE[0] <= (d - today).days <= PUT_DTE[1]]
+            if not fits:
+                out["no_expiry"].append(ticker)
+                continue
+            expiry = min(fits, key=lambda d: abs((d - today).days - 38))
+            raw = self._call("tradier", "chain", tradier.chain, ticker, expiry)
+            if raw:
+                out["options"] += len(store.save_chain(self.db, raw, utcnow()))
+                out["tickers"] += 1
         return out
 
     def pull_fundamentals(self) -> dict:

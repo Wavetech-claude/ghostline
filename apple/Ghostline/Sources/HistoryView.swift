@@ -16,22 +16,31 @@ struct HistoryView: View {
                 if !h.open.isEmpty {
                     Section("Open") {
                         ForEach(h.open) { p in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
-                                    Text(p.ticker).font(.headline)
-                                    Text(p.book ?? "").font(.caption).foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(Show.money(p.costBasis)).monospacedDigit()
+                            NavigationLink { PositionDetailView(book: p.book ?? "real", ticker: p.ticker) } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(p.ticker).font(.headline)
+                                        Text(p.book ?? "").font(.caption).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text(Show.money(p.costBasis)).monospacedDigit()
+                                    }
+                                    Text("\(Show.quantity(p.quantity)) at \(Show.money(p.averageCost)) avg")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    PriceLine(price: p.price, source: p.priceSource, asOf: p.priceAsOf)
                                 }
-                                Text("\(Show.quantity(p.quantity)) at \(Show.money(p.averageCost)) avg")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                PriceLine(price: p.price, source: p.priceSource, asOf: p.priceAsOf)
                             }
+                            .disabled(p.book == nil)
                         }
                     }
                 }
                 Section("Closed") {
-                    ForEach(h.closed) { ClosedRow(trade: $0) }
+                    ForEach(h.closed) { trade in
+                        if trade.ideaId != nil || trade.memoId != nil {
+                            NavigationLink { TradeReasonsView(trade: trade) } label: { ClosedRow(trade: trade) }
+                        } else {
+                            ClosedRow(trade: trade)
+                        }
+                    }
                     if h.closed.isEmpty { Text("No closed trade yet.").foregroundStyle(.secondary) }
                 }
             } else if let error = ledger.error {
@@ -123,7 +132,9 @@ struct ClosedRow: View {
             }
             .font(.caption).foregroundStyle(.secondary)
             if trade.ideaId != nil || trade.memoId != nil {
-                Text("From idea \(trade.ideaId.map(String.init) ?? "—")").font(.caption2).foregroundStyle(.tertiary)
+                Text([trade.ideaId != nil ? "From an idea" : nil, trade.memoId != nil ? "Memo" : nil]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 2)

@@ -16,6 +16,12 @@ from ghostline.db import Database
 CENT = Decimal("0.01")
 
 
+def _close_on(series: tuple[list[dt.date], list[Decimal]], day: dt.date) -> Decimal | None:
+    days, px = series
+    i = bisect.bisect_right(days, day) - 1
+    return px[i] if i >= 0 else None
+
+
 def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[str, Any]:
     book = db.fetch_one("SELECT id FROM books WHERE kind = %s", (kind,))
     if not book:
@@ -45,6 +51,10 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
     for t in trades:
         trades_by_day[t["at"].date()].append(t)
 
+    spy_rows = db.fetch_all("SELECT ts::date AS d, close FROM market_bars WHERE ticker = 'SPY' AND timeframe = '1D' "
+                            "AND ts::date <= %s ORDER BY ts", (end,))
+    spy = ([r["d"] for r in spy_rows], [Decimal(r["close"]) for r in spy_rows])
+    spy_start: Decimal | None = None
     cash = Decimal(0)
     held: dict[str, Decimal] = defaultdict(Decimal)
     last_fill: dict[str, Decimal] = {}
@@ -87,12 +97,17 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
             growth *= value / (prev_value + flow)
         elif prev_value is None and flow > 0:
             growth *= value / flow
+        spy_now = _close_on(spy, d)
+        if spy_start is None:
+            spy_start = spy_now
         points.append(
             {
                 "date": d.isoformat(),
                 "value": str(value),
                 "net_flow": str(flow.quantize(CENT)),
                 "twr_pct": str(((growth - 1) * 100).quantize(CENT)),
+                "spy_pct": None if spy_now is None or not spy_start
+                else str(((spy_now / spy_start - 1) * 100).quantize(CENT)),
             }
         )
         prev_value = value

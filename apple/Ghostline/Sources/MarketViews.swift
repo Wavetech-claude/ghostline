@@ -126,6 +126,10 @@ struct TickerView: View {
                                 Text("est \(e.estimate ?? "—") · actual \(e.actual ?? "—")").monospacedDigit()
                             }
                             .font(.callout)
+                            if let move = e.movePct {
+                                Text("Moved \(move.hasPrefix("-") ? "" : "+")\(Show.percent(move)) from the close before to the close after")
+                                    .font(.caption).foregroundStyle(PnLRow.tint(move))
+                            }
                             Text("\(e.source) · as of \(Stamp.short(e.asOf))").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }
@@ -133,12 +137,7 @@ struct TickerView: View {
                         SectionHeader("News")
                         ForEach(info.news) { n in
                             if let url = URL(string: n.url) {
-                                Link(destination: url) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(n.headline).font(.callout).foregroundStyle(.primary)
-                                        Text("\(n.source) · \(Stamp.short(n.publishedAt))").font(.caption2).foregroundStyle(.tertiary)
-                                    }
-                                }
+                                Link(destination: url) { NewsLine(item: n) }
                             }
                         }
                     }
@@ -176,10 +175,4 @@ struct SectionHeader: View {
     var body: some View { Text(title).font(.headline).padding(.top, 8) }
 }
 
-extension Stamp {
-    static func day(_ iso: String) -> String {
-        if let d = date(iso) { return d.formatted(date: .abbreviated, time: .omitted) }
-        if let d = try? Date(iso, strategy: .iso8601.year().month().day()) { return d.formatted(date: .abbreviated, time: .omitted) }
-        return iso
-    }
-}
+

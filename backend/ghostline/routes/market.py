@@ -3,6 +3,8 @@ they last answered). Every price carries its source and time."""
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
@@ -51,8 +53,24 @@ def quotes(request: Request, tickers: str, sub: str = OwnerSub) -> dict:
 def news_earnings(request: Request, ticker: str, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     t = ticker.upper()
-    return {"ticker": t, "news": store.as_json(store.news_for(db, t)),
-            "earnings": store.as_json(store.earnings_for(db, t)), "filings": store.as_json(store.filings_for(db, t))}
+    earnings = store.as_json(store.earnings_for(db, t))
+    bars = store.bars(db, t, "1D", limit=2000)
+    closes = [(b["ts"].date(), b["close"]) for b in bars]
+    for e in earnings:
+        e["move_pct"] = _move_around(closes, dt.date.fromisoformat(str(e["at"])[:10]))
+    return {"ticker": t, "news": store.as_json(store.news_for(db, t)), "earnings": earnings,
+            "filings": store.as_json(store.filings_for(db, t))}
+
+
+def _move_around(closes: list[tuple[dt.date, Any]], day: dt.date) -> str | None:
+    """The two-session move around a report: the last close before the report date to the first close after it
+    (covers a report before the open or after the close, since the timing is not stored). None without both closes."""
+    before = [c for d, c in closes if d < day]
+    after = [c for d, c in closes if d > day]
+    if not before or not after or not before[-1]:
+        return None
+    move = (Decimal(after[0]) / Decimal(before[-1]) - 1) * 100
+    return str(move.quantize(Decimal("0.01")))
 
 
 class WatchIn(BaseModel):

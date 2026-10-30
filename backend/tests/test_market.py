@@ -124,7 +124,7 @@ def test_jobs_skip_unconfigured_sources_and_store_the_rest(fresh_db, monkeypatch
     db = Database(settings())
     http, _ = fake_http()
     db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL')")
-    jobs = Jobs(db, http)
+    jobs = Jobs(db, http, sleep=lambda _: None)
     assert jobs.pull_bars() == {"tickers": 1, "bars": 2}
     out = jobs.pull_quotes()
     assert out == {"quotes": 1, "source": "alpaca"}            # Tradier skipped (no key), Alpaca answered
@@ -187,7 +187,7 @@ def test_the_worker_registers_the_plans_schedule(fresh_db):
     db = Database(settings())
     sch = BackgroundScheduler(timezone="America/Los_Angeles")
     ids = schedule.register(sch, db)
-    assert ids == ["pull_macro", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
+    assert ids == ["pull_macro", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
     quotes = sch.get_job("pull_quotes")
     assert "day_of_week='mon-fri'" in str(quotes.trigger) and "hour='6-13'" in str(quotes.trigger)
     assert str(schedule.PT) == "America/Los_Angeles"
@@ -197,3 +197,102 @@ def test_the_worker_registers_the_plans_schedule(fresh_db):
 def test_settings_are_the_environment():
     assert Settings(DATABASE_URL="x").database_url == "x"
     assert json.loads('{"a": 1}')["a"] == 1
+
+
+# ── spec gaps: chains before the scan, GDELT tone, the move around each report ─────────────────────────────
+# The shape GDELT answered on 2026-10-30 (hourly points, the first four of the real answer)
+GDELT_ANSWER = {"query_details": {"title": "\"stock market\"", "date_resolution": "hour"}, "timeline": [
+    {"series": "Average Tone", "data": [{"date": "20261023T230000Z", "value": -1.1377},
+                                        {"date": "20261024T000000Z", "value": -1.8871},
+                                        {"date": "20261024T010000Z", "value": 0},
+                                        {"date": "20261024T020000Z", "value": -1.3348}]}]}
+
+
+def test_gdelt_tone_averages_the_hours_of_each_day():
+    from ghostline.market.sources import GDELT
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["mode"] == "timelinetone" and request.url.params["timespan"] == "7d"
+        return httpx.Response(200, json=GDELT_ANSWER)
+    pts = GDELT(httpx.Client(transport=httpx.MockTransport(handler))).tone('"stock market"')
+    assert [(p.series, p.ts, p.value) for p in pts] == [
+        ('gdelt:"stock market"', dt.date(2026, 10, 23), Decimal("-1.1377")),
+        ('gdelt:"stock market"', dt.date(2026, 10, 24), Decimal("-1.0740"))]
+
+
+def _occ(ticker: str, expiry: dt.date, kind: str, strike: int) -> str:
+    return f"{ticker}{expiry:%y%m%d}{kind}{strike * 1000:08d}"
+
+
+def test_the_chain_pull_stores_the_expiry_nearest_38_days_for_stocks_the_owner_would_own(fresh_db, keys):
+    today = dt.date.today()
+    expiries = [today + dt.timedelta(days=d) for d in (10, 33, 40, 60)]
+    put = _occ("AAPL", expiries[2], "P", 95)
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if path.endswith("/options/expirations"):
+            if request.url.params["symbol"] == "MSFT":
+                return httpx.Response(200, json={"expirations": {"date": [expiries[0].isoformat()]}})
+            return httpx.Response(200, json={"expirations": {"date": [d.isoformat() for d in expiries]}})
+        if path.endswith("/options/chains"):
+            return httpx.Response(200, json={"options": {"option": [
+                {"symbol": put, "bid": 1.2, "ask": 1.3, "last": 1.25, "volume": 10, "open_interest": 900,
+                 "greeks": {"delta": -0.21, "mid_iv": 0.31}},
+                {"symbol": "not-an-option"}]}})
+        return httpx.Response(404)
+    db = Database(settings())
+    db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL'), ('MSFT'), ('SPY')")
+    out = Jobs(db, httpx.Client(transport=httpx.MockTransport(handler))).pull_chains()
+    assert out == {"tickers": 1, "options": 1, "no_expiry": ["MSFT"]}          # SPY is a market ticker, not a candidate
+    chain_calls = [r for r in seen if r.url.path.endswith("/chains")]
+    assert [r.url.params["expiration"] for r in chain_calls] == [expiries[2].isoformat()]   # 40 days beats 33
+    row = db.fetch_one("SELECT strike, kind, bid, ask, open_interest, iv, delta FROM option_chains WHERE option_symbol = %s",
+                       (put,))
+    assert (row["strike"], row["kind"], row["open_interest"], row["delta"]) == (Decimal("95"), "put", Decimal("900"), Decimal("-0.21"))
+    assert store.latest_quotes(db, [put])[put]["bid"] == Decimal("1.2")     # the chain doubles as the option's quote
+    db.close()
+
+
+def test_the_chain_pull_stops_when_tradier_is_not_configured(fresh_db, monkeypatch, keys):
+    monkeypatch.delenv("GHOSTLINE_KEY_TRADIER")
+    db = Database(settings())
+    db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL'), ('MSFT')")
+    http, seen = fake_http()
+    assert Jobs(db, http).pull_chains() == {"tickers": 0, "options": 0, "no_expiry": []}
+    assert seen == []                                                        # no call made without a key
+    assert [p["status"] for p in db.fetch_all("SELECT status FROM data_pulls WHERE source = 'tradier'")] == ["skipped"]
+    db.close()
+
+
+def test_the_macro_pull_adds_gdelt_tone_spaced_inside_its_limit(fresh_db, keys):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.gdeltproject.org":
+            return httpx.Response(200, json=GDELT_ANSWER)
+        return httpx.Response(200, json=ANSWERS["api.stlouisfed.org/fred/series/observations"])
+    db = Database(settings())
+    waits = []
+    out = Jobs(db, httpx.Client(transport=httpx.MockTransport(handler)), sleep=waits.append).pull_macro()
+    assert out == {"points": 2 * 6, "tone_points": 2 * 3}
+    assert waits == [6, 6]                                       # GDELT asks for one request every 5 seconds
+    rows = db.fetch_all("SELECT series FROM macro_series WHERE source = 'gdelt' ORDER BY series, ts")
+    assert {r["series"] for r in rows} == {'gdelt:"stock market"', 'gdelt:"India economy"', 'gdelt:"Federal Reserve"'}
+    db.close()
+
+
+def test_each_past_report_shows_how_the_stock_moved_around_it(client):
+    from ghostline.market import Bar
+    h = {"Authorization": f"Bearer {sign_in(client)}"}
+    db: Database = client.app.state.db
+    now = dt.datetime(2026, 10, 30, 9, 0, tzinfo=dt.UTC)
+    closes = {dt.date(2026, 10, 27): "100", dt.date(2026, 10, 28): "104", dt.date(2026, 10, 29): "95.5"}
+    store.save_bars(db, "AAPL", "1D", [Bar(dt.datetime.combine(d, dt.time(4), tzinfo=dt.UTC), Decimal(c), Decimal(c),
+                                           Decimal(c), Decimal(c), Decimal(1)) for d, c in closes.items()], "alpaca", now)
+    for day in ("2026-10-28", "2026-10-29", "2027-01-28"):
+        db.execute("INSERT INTO earnings (ticker, at, estimate, source, as_of) VALUES ('AAPL', %s, 1, 'fmp', now())", (day,))
+    got = {e["at"]: e["move_pct"] for e in client.get("/news-earnings?ticker=AAPL", headers=h).json()["earnings"]}
+    assert got == {"2026-10-28": "-4.50",          # 100 (the 27th) to 95.50 (the 29th)
+                   "2026-10-29": None,             # no close after it yet
+                   "2027-01-28": None}             # not reported yet
