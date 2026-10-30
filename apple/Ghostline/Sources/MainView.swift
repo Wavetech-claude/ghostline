@@ -4,29 +4,50 @@ import SwiftUI
 /// A tab bar on iPhone that becomes a sidebar on Mac and iPad.
 struct MainView: View {
     @Environment(SessionModel.self) private var session
+    @Environment(LedgerModel.self) private var ledger
 
     var body: some View {
+        @Bindable var ledger = ledger
         TabView {
-            Tab("Today", systemImage: "sun.horizon") {
-                NavigationStack { TodayView() }
-            }
-            Tab("Account", systemImage: "person.crop.circle") {
-                NavigationStack { AccountView() }
-            }
-            Tab("Settings", systemImage: "slider.horizontal.3") {
-                NavigationStack { SettingsView() }
-            }
+                    Tab("Today", systemImage: "sun.horizon") {
+                        NavigationStack { TodayView() }
+                    }
+                    Tab("Portfolio", systemImage: "chart.pie") {
+                        NavigationStack { PortfolioView() }
+                    }
+                    Tab("History", systemImage: "list.bullet.rectangle") {
+                        NavigationStack { HistoryView() }
+                    }
+                    Tab("Account", systemImage: "person.crop.circle") {
+                        NavigationStack { AccountView() }
+                    }
+                    Tab("Settings", systemImage: "slider.horizontal.3") {
+                        NavigationStack { SettingsView() }
+                    }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .sheet(isPresented: $ledger.showingTradeForm) { TradeFormView() }
+        .sheet(isPresented: $ledger.showingCashFlow) { CashFlowSheet() }
     }
 }
 
 struct TodayView: View {
     @Environment(SessionModel.self) private var session
+    @Environment(LedgerModel.self) private var ledger
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if !ledger.rulesComplete {
+                    ContentCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Before anything else", systemImage: "shield.lefthalf.filled")
+                                .font(.headline)
+                            Text("Set your risk rules in Settings. Until they are saved, no idea passes.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 ContentCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Connected", systemImage: "checkmark.seal")
@@ -38,62 +59,35 @@ struct TodayView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                ContentCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Before anything else", systemImage: "shield.lefthalf.filled")
-                            .font(.headline)
-                        Text("Set your risk rules in Settings. Until they are saved, no idea passes.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
             }
             .padding()
             .frame(maxWidth: 640, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Today")
-        .refreshable { await session.refreshBackend() }
-    }
-}
-
-struct AccountView: View {
-    @Environment(SessionModel.self) private var session
-
-    var body: some View {
-        Form {
-            if case .signedIn(let account) = session.state {
-                Section("Signed in") {
-                    LabeledContent("Apple ID", value: account.emailMasked.isEmpty ? "hidden" : account.emailMasked)
-                    LabeledContent("Member since", value: Self.day(account.createdAt))
-                }
-            }
-            Section {
-                Button("Sign out", role: .destructive) {
-                    Task { await session.signOut() }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Account")
-    }
-
-    static func day(_ iso: String) -> String {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        guard let date = fractional.date(from: iso) ?? plain.date(from: iso) else { return iso }
-        return date.formatted(date: .abbreviated, time: .omitted)
+        .task { await ledger.loadRules() }
+        .refreshable { await session.refreshBackend(); await ledger.loadRules() }
     }
 }
 
 struct SettingsView: View {
     @Environment(SessionModel.self) private var session
+    @Environment(LedgerModel.self) private var ledger
 
     var body: some View {
         Form {
-            Section("Risk rules") {
-                Text("Your rules come in the next release: max loss per idea, cash-secured puts only, no new ideas before earnings, liquidity floors, a cap on open ideas, and day trades in practice only. Until you save them, no idea passes.")
-                    .foregroundStyle(.secondary)
+            Section {
+                NavigationLink {
+                    RiskRulesView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading) {
+                            Text("Risk Rules")
+                            Text(ledger.rulesComplete ? "Set and enforced" : "Not set: no idea passes until they are")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "shield.lefthalf.filled") }
+                }
             }
             Section("Backend") {
                 LabeledContent("Address", value: session.configuration.baseURL.host() ?? "")
@@ -105,6 +99,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Settings")
+        .task { await ledger.loadRules() }
     }
 }
 
