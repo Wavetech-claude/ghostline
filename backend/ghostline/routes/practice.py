@@ -32,7 +32,7 @@ def _row(r: dict) -> dict:
 
 
 class OrderIn(BaseModel):
-    book: str = Field(default="practice", pattern="^(practice|ai)$")
+    book: str = Field(default="practice", pattern="^(practice|ai|options)$")
     ticker: str = Field(default="", max_length=12)
     asset: str = Field(default="stock", pattern="^(stock|option)$")
     side: str = Field(pattern="^(buy|sell|sell_to_open|buy_to_close)$")
@@ -116,7 +116,7 @@ def cancel_order(order_id: int, request: Request, sub: str = OwnerSub) -> dict:
 
 
 @router.get("/practice/account")
-def practice_account(request: Request, book: str = Query(default="practice", pattern="^(practice|ai)$"),
+def practice_account(request: Request, book: str = Query(default="practice", pattern="^(practice|ai|options)$"),
                      sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     p = Practice(db)
@@ -186,7 +186,7 @@ def expirations(request: Request, ticker: str, sub: str = OwnerSub) -> dict:
 
 @router.get("/options/chain")
 def chain(request: Request, ticker: str, expiry: dt.date,
-          book: str = Query(default="practice", pattern="^(practice|ai)$"), sub: str = OwnerSub) -> dict:
+          book: str = Query(default="practice", pattern="^(practice|ai|options)$"), sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     t = ticker.strip().upper()
     raw, why = _counted(db, "chain", _tradier(request).chain, t, expiry)

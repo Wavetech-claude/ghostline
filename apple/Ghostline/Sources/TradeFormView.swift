@@ -102,12 +102,28 @@ struct TradeFormView: View {
                 if case .success(let url) = result { load(url) }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { ledger.prefillTodo = nil; dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }.disabled(!valid || ledger.busy)
                 }
             }
+            .onAppear(perform: prefill)
         }
+    }
+
+    /// "I Placed It" on a to-do item: the real trade is filled in from the plan; the owner corrects the fill details.
+    private func prefill() {
+        guard let t = ledger.prefillTodo else { return }
+        book = "real"
+        asset = t.asset
+        side = t.side
+        ticker = t.ticker
+        quantity = t.quantity
+        fill = t.limitPrice.map { Show.plainNumber($0) } ?? ""
+        optionSymbol = t.optionSymbol ?? ""
+        lane = t.lane ?? ""
+        note = t.note ?? ""
+        readNote = "Filled from your to-do item. Correct the quantity, price and time to what your broker shows."
     }
 
     private func numberField(_ label: String, _ text: Binding<String>) -> some View {
@@ -161,7 +177,11 @@ struct TradeFormView: View {
                                side: side, quantity: quantity, fill: fill, at: Stamp.string(at), fees: fees,
                                broker: broker.isEmpty ? nil : broker, note: note.isEmpty ? nil : note,
                                optionSymbol: asset == "option" ? optionSymbol : nil, lane: lane.isEmpty ? nil : lane)
-        if await ledger.addTrade(input, attachment: attachment) != nil {
+        if let row = await ledger.addTrade(input, attachment: attachment) {
+            if let todo = ledger.prefillTodo {
+                await ledger.closeTodo(todo, tradeId: row.id)
+            }
+            ledger.prefillTodo = nil
             dismiss()
         } else {
             problem = ledger.error

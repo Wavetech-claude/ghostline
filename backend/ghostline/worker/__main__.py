@@ -21,6 +21,9 @@ from ghostline.db import Database
 from ghostline.worker import schedule
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# the scheduler logs two INFO lines per run; with a 20-second Claude poll that is noise in Loki. Its warnings and
+# errors (a missed run, a job that raised) still show.
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger("ghostline.worker")
 
 

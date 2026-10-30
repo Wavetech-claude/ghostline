@@ -106,10 +106,16 @@ struct TickerView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                NavigationLink { DeepDiveView(ticker: ticker) } label: {
-                    Label("Should I Buy?", systemImage: "sparkles")
+                HStack(spacing: 10) {
+                    NavigationLink { DeepDiveView(ticker: ticker) } label: {
+                        Label("Should I Buy?", systemImage: "sparkles")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    NavigationLink { AlertsView(ticker: ticker) } label: {
+                        Label("Alerts", systemImage: "bell")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
                 if let info {
                     if !info.earnings.isEmpty {
                         SectionHeader("Earnings")

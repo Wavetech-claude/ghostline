@@ -10,10 +10,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from ghostline import ledger, prices
 from ghostline.auth import OwnerSub
+from ghostline.ghost import Ghost
 from ghostline.ledger import Trade
 
 router = APIRouter()
-BOOKS = ("real", "practice", "ai", "ghost")
+BOOKS = ("real", "practice", "ai", "ghost", "options")
 SIDES = ("buy", "sell", "sell_to_open", "buy_to_close")
 LANES = ("long", "swing", "puts", "day")
 
@@ -66,7 +67,8 @@ def books(request: Request, sub: str = OwnerSub) -> dict:
 
 
 class CashFlow(BaseModel):
-    book: str = Field(pattern="^(real|practice|ai|ghost)$")
+    # the ghost is the system's: it mirrors the AI book's flows (ghost.py), never typed in
+    book: str = Field(pattern="^(real|practice|ai|options)$")
     amount: Decimal = Field(description="positive = deposit, negative = withdrawal; any amount")
     at: dt.datetime
     note: str | None = Field(default=None, max_length=500)
@@ -87,7 +89,11 @@ def add_cash_flow(body: CashFlow, request: Request, sub: str = OwnerSub) -> dict
                        (bid, body.amount, body.at, body.note))
     with db.connection() as conn:
         conn.commit()
-    return _row(row)
+    out = _row(row)
+    if body.book == "ai":
+        # the ghost mirrors it now when SPY's price for the date is stored; the worker's half-hourly sync otherwise
+        out["ghost"] = Ghost(db).sync()
+    return out
 
 
 @router.get("/cash-flows")
@@ -104,7 +110,7 @@ def cash_flows(request: Request, book: str | None = None, sub: str = OwnerSub) -
 
 # ── trades ─────────────────────────────────────────────────────────────────────────────────────────────────
 class TradeIn(BaseModel):
-    book: str = Field(pattern="^(real|practice|ai|ghost)$")
+    book: str = Field(pattern="^(real|practice|ai|options)$")
     ticker: str = Field(min_length=1, max_length=12)
     asset: str = Field(default="stock", pattern="^(stock|option)$")
     side: str = Field(pattern="^(buy|sell|sell_to_open|buy_to_close)$")

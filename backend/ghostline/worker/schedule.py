@@ -7,12 +7,15 @@ from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ghostline import storage
+from ghostline import alerts, storage
+from ghostline.ai_trader import AITrader
 from ghostline.claude.jobs import Jobs as ClaudeJobs
 from ghostline.claude.jobs import enqueue
 from ghostline.config import Settings, load
 from ghostline.db import Database
+from ghostline.ghost import Ghost
 from ghostline.ideas import Scan
+from ghostline.invest import Planner
 from ghostline.market.jobs import Jobs
 from ghostline.practice import Practice
 
@@ -32,6 +35,17 @@ def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: P
 
     def morning_brief() -> int:
         return enqueue(db, "brief", {"push": True})
+
+    ghost = Ghost(db)
+    planner = Planner(db)
+    ai = AITrader(db)
+    options = AITrader(db, book="options")
+
+    def exits() -> dict:
+        return {"ai": ai.run_exits(), "options": options.run_exits()}
+
+    def alerts_check() -> dict:
+        return alerts.check(db, settings)
     def scan_ideas() -> dict:
         s = Scan(db)
         out = s.run()
@@ -53,6 +67,16 @@ def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: P
         # Claude: the queue drains one job at a time; the brief is queued at 05:30 PT and pushed when written
         ("claude_poll", claude_poll, IntervalTrigger(seconds=20)),
         ("morning_brief", morning_brief, CronTrigger(day_of_week="mon-fri", hour=5, minute=30, timezone=PT)),
+        # phase 6: the ghost follows the AI book's flows; the AI trader enters after the scan and checks its exits
+        # with the fresh quotes; options practice sells puts; approved "Invest this" plans are placed at the open;
+        # price alerts are checked with every quote pull
+        ("ghost_sync", ghost.sync, CronTrigger(minute="*/30", timezone=PT)),
+        ("invest_place", planner.place_due, CronTrigger(day_of_week="mon-fri", hour=6, minute=35, timezone=PT)),
+        ("ai_entries", ai.run_entries, CronTrigger(day_of_week="mon-fri", hour=6, minute=40, timezone=PT)),
+        ("options_entries", options.run_entries,
+         CronTrigger(day_of_week="mon-fri", hour=6, minute=45, timezone=PT)),
+        ("ai_exits", exits, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="5,35", timezone=PT)),
+        ("alerts_check", alerts_check, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="6,36", timezone=PT)),
     ]
     for job_id, fn, trigger in plan:
         scheduler.add_job(fn, trigger, id=job_id, name=job_id, replace_existing=True, coalesce=True,

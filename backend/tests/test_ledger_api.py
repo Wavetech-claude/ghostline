@@ -11,7 +11,7 @@ def _h(client):
 
 def test_the_four_books_exist_and_cash_follows_flows_and_trades(client):
     h = _h(client)
-    assert [b["kind"] for b in client.get("/books", headers=h).json()["books"]] == ["real", "practice", "ai", "ghost"]
+    assert [b["kind"] for b in client.get("/books", headers=h).json()["books"]] == ["real", "practice", "ai", "ghost", "options"]
     assert client.post("/cash-flows", json={"book": "real", "amount": "250.5", "at": "2026-10-01T00:00:00Z"}, headers=h).status_code == 201
     assert client.post("/cash-flows", json={"book": "real", "amount": "-50", "at": "2026-10-02T00:00:00Z", "note": "fee"}, headers=h).status_code == 201
     assert client.post("/cash-flows", json={"book": "real", "amount": "0", "at": "2026-10-02T00:00:00Z"}, headers=h).status_code == 422

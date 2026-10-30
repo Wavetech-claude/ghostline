@@ -29,6 +29,23 @@ struct AccountView: View {
                 NavigationLink { PracticeAccountView() } label: {
                     Label("Practice Account", systemImage: "gamecontroller")
                 }
+                NavigationLink { AITraderView() } label: {
+                    Label("AI Trader", systemImage: "cpu")
+                }
+                NavigationLink { OptionsPracticeView() } label: {
+                    Label("Options Practice", systemImage: "list.number")
+                }
+            }
+            Section("Records") {
+                NavigationLink { TodoListView() } label: {
+                    Label("To Place at Your Broker", systemImage: "checklist")
+                }
+                NavigationLink { AlertsView() } label: {
+                    Label("Price Alerts", systemImage: "bell")
+                }
+                NavigationLink { StatementsView() } label: {
+                    Label("Statements", systemImage: "doc.text")
+                }
             }
             if case .signedIn(let account) = session.state {
                 Section("Signed in") {
@@ -81,7 +98,8 @@ struct CashFlowSheet: View {
         NavigationStack {
             Form {
                 Picker("Book", selection: $book) {
-                    ForEach(ledger.books) { Text($0.name).tag($0.kind) }
+                    // the ghost is the system's: it mirrors the AI trader's deposits on its own
+                    ForEach(ledger.books.filter { $0.kind != "ghost" }) { Text($0.name).tag($0.kind) }
                 }
                 Picker("Direction", selection: $direction) {
                     Text("Deposit").tag("deposit")
@@ -119,5 +137,9 @@ struct CashFlowSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .onAppear {
+            if let b = ledger.cashFlowBook { book = b }
+            ledger.cashFlowBook = nil
+        }
     }
 }
