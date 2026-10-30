@@ -15,6 +15,9 @@ struct MainView: View {
                     Tab("Portfolio", systemImage: "chart.pie") {
                         NavigationStack { PortfolioView() }
                     }
+                    Tab("Watchlist", systemImage: "eye") {
+                        NavigationStack { WatchlistView() }
+                    }
                     Tab("History", systemImage: "list.bullet.rectangle") {
                         NavigationStack { HistoryView() }
                     }
@@ -55,7 +58,7 @@ struct TodayView: View {
                         if let backend = session.backend {
                             Text("Ghostline \(backend.shortDescription) on \(session.configuration.environment).")
                         }
-                        Text("The morning brief, your watchlist and your ideas arrive here as the app grows.")
+                        Text("The morning brief and your ideas arrive here as the app grows. Charts and news live in Watchlist.")
                             .foregroundStyle(.secondary)
                     }
                 }

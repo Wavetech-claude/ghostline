@@ -1,0 +1,263 @@
+"""The free sources, each a thin, testable client: a key from the environment (GHOSTLINE_KEY_<SOURCE>), one httpx
+client (tests inject a MockTransport), answers turned into the dataclasses of ghostline.market. No source computes
+anything, and none is called without a key: NotConfigured stops the job with a logged reason.
+
+Endpoints (read 2026-10, each a public free tier):
+  Alpaca   https://data.alpaca.markets/v2  bars, latest quotes (IEX feed)   keys: APCA-API-KEY-ID + APCA-API-SECRET-KEY
+  Massive  https://api.massive.com/v2       grouped daily bars (the whole market in one call), 5/min
+  FMP      https://financialmodelingprep.com/stable  profile, ratios, earnings calendar, 250/day
+  Finnhub  https://finnhub.io/api/v1        company news, earnings calendar, quote
+  EDGAR    https://data.sec.gov             submissions (filings), no key, a User-Agent with contact
+  FRED     https://api.stlouisfed.org/fred  series observations
+  Tradier  https://api.tradier.com/v1       quotes, option chains (the owner's account)
+  GDELT    https://api.gdeltproject.org/api/v2/doc/doc  news tone, no key
+"""
+from __future__ import annotations
+
+import datetime as dt
+import os
+from decimal import Decimal
+from typing import Any
+
+import httpx
+
+from ghostline.market import Bar, Earning, Filing, MacroPoint, NewsItem, NotConfigured, Quote, dec
+
+UA = "Ghostline/0.2 (personal research tool; contact: owner)"
+
+
+def key_for(name: str) -> str | None:
+    return os.environ.get(f"GHOSTLINE_KEY_{name.upper()}") or None
+
+
+def _date(s: Any) -> dt.date | None:
+    try:
+        return dt.date.fromisoformat(str(s)[:10])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _stamp(s: Any) -> dt.datetime | None:
+    if s is None:
+        return None
+    if isinstance(s, int | float):
+        return dt.datetime.fromtimestamp(float(s) / (1000 if float(s) > 1e11 else 1), tz=dt.UTC)
+    try:
+        return dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class Source:
+    name = "base"
+    base_url = ""
+    needs_key = True
+
+    def __init__(self, http: httpx.Client | None = None) -> None:
+        self.http = http or httpx.Client(timeout=30, headers={"User-Agent": UA})
+
+    def key(self) -> str:
+        k = key_for(self.name)
+        if self.needs_key and not k:
+            raise NotConfigured(f"{self.name}: GHOSTLINE_KEY_{self.name.upper()} is not set")
+        return k or ""
+
+    def get(self, path: str, params: dict | None = None, headers: dict | None = None) -> Any:
+        r = self.http.get(self.base_url + path, params=params, headers=headers)
+        r.raise_for_status()
+        return r.json()
+
+
+class Alpaca(Source):
+    name = "alpaca"
+    base_url = "https://data.alpaca.markets/v2"
+
+    def _headers(self) -> dict:
+        k = self.key()
+        secret = os.environ.get("GHOSTLINE_KEY_ALPACA_SECRET") or ""
+        if not secret:
+            raise NotConfigured("alpaca: GHOSTLINE_KEY_ALPACA_SECRET is not set")
+        return {"APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": secret}
+
+    def bars(self, ticker: str, start: dt.date, end: dt.date, timeframe: str = "1Day") -> list[Bar]:
+        j = self.get(f"/stocks/{ticker}/bars", params={"timeframe": timeframe, "start": start.isoformat(),
+                                                       "end": end.isoformat(), "limit": 10000, "adjustment": "split",
+                                                       "feed": "iex"}, headers=self._headers())
+        out = []
+        for b in j.get("bars") or []:
+            ts = _stamp(b.get("t"))
+            if ts:
+                out.append(Bar(ts, dec(b["o"]), dec(b["h"]), dec(b["l"]), dec(b["c"]), dec(b.get("v")) or Decimal(0)))
+        return out
+
+    def quotes(self, tickers: list[str]) -> list[Quote]:
+        j = self.get("/stocks/quotes/latest", params={"symbols": ",".join(tickers), "feed": "iex"},
+                     headers=self._headers())
+        out = []
+        for sym, q in (j.get("quotes") or {}).items():
+            ts = _stamp(q.get("t"))
+            if ts:
+                out.append(Quote(sym, dec(q.get("bp")), dec(q.get("ap")), None, ts, delayed=True))
+        return out
+
+
+class Massive(Source):
+    name = "massive"
+    base_url = "https://api.massive.com/v2"
+
+    def grouped_daily(self, day: dt.date) -> dict[str, Bar]:
+        j = self.get(f"/aggs/grouped/locale/us/market/stocks/{day.isoformat()}",
+                     params={"adjusted": "true", "apiKey": self.key()})
+        out = {}
+        for r in j.get("results") or []:
+            ts = _stamp(r.get("t"))
+            if ts and r.get("T"):
+                out[r["T"]] = Bar(ts, dec(r["o"]), dec(r["h"]), dec(r["l"]), dec(r["c"]), dec(r.get("v")) or Decimal(0))
+        return out
+
+
+class FMP(Source):
+    name = "fmp"
+    base_url = "https://financialmodelingprep.com/stable"
+
+    def profile(self, ticker: str) -> dict:
+        j = self.get("/profile", params={"symbol": ticker, "apikey": self.key()})
+        return (j[0] if isinstance(j, list) and j else j) or {}
+
+    def ratios(self, ticker: str) -> dict:
+        j = self.get("/ratios-ttm", params={"symbol": ticker, "apikey": self.key()})
+        return (j[0] if isinstance(j, list) and j else j) or {}
+
+    def earnings(self, ticker: str) -> list[Earning]:
+        j = self.get("/earnings", params={"symbol": ticker, "apikey": self.key(), "limit": 12})
+        return [Earning(ticker, d, dec(e.get("epsEstimated")), dec(e.get("epsActual")))
+                for e in (j or []) if (d := _date(e.get("date")))]
+
+
+class Finnhub(Source):
+    name = "finnhub"
+    base_url = "https://finnhub.io/api/v1"
+
+    def news(self, ticker: str, since: dt.date, until: dt.date) -> list[NewsItem]:
+        j = self.get("/company-news", params={"symbol": ticker, "from": since.isoformat(), "to": until.isoformat(),
+                                              "token": self.key()})
+        out = []
+        for n in j or []:
+            ts = _stamp(n.get("datetime"))
+            if ts and n.get("headline") and n.get("url"):
+                out.append(NewsItem(ticker, n["headline"][:500], n["url"], ts))
+        return out
+
+    def earnings(self, ticker: str, since: dt.date, until: dt.date) -> list[Earning]:
+        j = self.get("/calendar/earnings", params={"symbol": ticker, "from": since.isoformat(),
+                                                   "to": until.isoformat(), "token": self.key()})
+        return [Earning(ticker, d, dec(e.get("epsEstimate")), dec(e.get("epsActual")))
+                for e in (j.get("earningsCalendar") or []) if (d := _date(e.get("date")))]
+
+    def quote(self, ticker: str) -> Quote | None:
+        q = self.get("/quote", params={"symbol": ticker, "token": self.key()})
+        ts = _stamp(q.get("t"))
+        return Quote(ticker, None, None, dec(q.get("c")), ts, delayed=True) if ts and q.get("c") else None
+
+
+class Edgar(Source):
+    name = "edgar"
+    base_url = "https://data.sec.gov"
+    needs_key = False
+
+    def cik(self, ticker: str) -> str | None:
+        r = self.http.get("https://www.sec.gov/files/company_tickers.json")
+        r.raise_for_status()
+        for row in r.json().values():
+            if str(row.get("ticker", "")).upper() == ticker.upper():
+                return f"{int(row['cik_str']):010d}"
+        return None
+
+    def filings(self, ticker: str, forms: tuple[str, ...] = ("10-K", "10-Q", "8-K", "4")) -> list[Filing]:
+        cik = self.cik(ticker)
+        if not cik:
+            return []
+        j = self.get(f"/submissions/CIK{cik}.json")
+        recent = (j.get("filings") or {}).get("recent") or {}
+        out = []
+        for acc, form, filed, doc in zip(recent.get("accessionNumber", []), recent.get("form", []),
+                                         recent.get("filingDate", []), recent.get("primaryDocument", []), strict=False):
+            if form in forms and (d := _date(filed)):
+                folder = acc.replace('-', '')
+                url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{folder}/{doc}" if doc else None
+                out.append(Filing(acc, ticker.upper(), form, d, url))
+        return out
+
+
+class FRED(Source):
+    name = "fred"
+    base_url = "https://api.stlouisfed.org/fred"
+
+    def series(self, series_id: str, since: dt.date) -> list[MacroPoint]:
+        j = self.get("/series/observations", params={"series_id": series_id, "api_key": self.key(),
+                                                     "file_type": "json", "observation_start": since.isoformat()})
+        return [MacroPoint(series_id, d, dec(o.get("value")) if o.get("value") != "." else None)
+                for o in (j.get("observations") or []) if (d := _date(o.get("date")))]
+
+
+class Tradier(Source):
+    name = "tradier"
+    base_url = "https://api.tradier.com/v1"
+
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.key()}", "Accept": "application/json"}
+
+    def quotes(self, tickers: list[str]) -> list[Quote]:
+        j = self.get("/markets/quotes", params={"symbols": ",".join(tickers), "greeks": "false"},
+                     headers=self._headers())
+        raw = ((j.get("quotes") or {}).get("quote")) or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        out = []
+        for q in raw:
+            ts = _stamp(q.get("trade_date")) or dt.datetime.now(dt.UTC)
+            out.append(Quote(q.get("symbol"), dec(q.get("bid")), dec(q.get("ask")), dec(q.get("last")), ts,
+                             delayed=True))
+        return out
+
+    def expirations(self, ticker: str) -> list[dt.date]:
+        j = self.get("/markets/options/expirations", params={"symbol": ticker, "includeAllRoots": "true"},
+                     headers=self._headers())
+        return [d for s in ((j.get("expirations") or {}).get("date") or []) if (d := _date(s))]
+
+    def chain(self, ticker: str, expiration: dt.date) -> list[dict]:
+        j = self.get("/markets/options/chains", params={"symbol": ticker, "expiration": expiration.isoformat(),
+                                                        "greeks": "true"}, headers=self._headers())
+        raw = ((j.get("options") or {}).get("option")) or []
+        return raw if isinstance(raw, list) else [raw]
+
+
+class GDELT(Source):
+    name = "gdelt"
+    base_url = "https://api.gdeltproject.org/api/v2/doc/doc"
+    needs_key = False
+
+    def tone(self, query: str, days: int = 7) -> list[MacroPoint]:
+        j = self.get("", params={"query": query, "mode": "timelinetone", "format": "json", "timespan": f"{days}d"})
+        series = (j.get("timeline") or [{}])[0].get("data") or []
+        out = []
+        for p in series:
+            d = _date(p.get("date"))
+            if d:
+                out.append(MacroPoint(f"gdelt:{query}", d, dec(p.get("value"))))
+        return out
+
+
+ALL: dict[str, type[Source]] = {s.name: s for s in (Alpaca, Massive, FMP, Finnhub, Edgar, FRED, Tradier, GDELT)}
+
+
+def configured() -> dict[str, bool]:
+    out = {}
+    for name, cls in ALL.items():
+        if not cls.needs_key:
+            out[name] = True
+        elif name == "alpaca":
+            out[name] = bool(key_for("alpaca") and os.environ.get("GHOSTLINE_KEY_ALPACA_SECRET"))
+        else:
+            out[name] = bool(key_for(name))
+    return out
