@@ -87,14 +87,23 @@ struct WatchlistView: View {
 /// One ticker: the chart, then its news, earnings and filings, each with its source and time.
 struct TickerView: View {
     @Environment(SessionModel.self) private var session
+    @Environment(PracticeModel.self) private var practice
     let ticker: String
     @State private var info: NewsAndEarnings?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                NavigationLink { ChartsView(ticker: ticker) } label: {
-                    Label("Chart", systemImage: "chart.xyaxis.line")
+                HStack(spacing: 10) {
+                    NavigationLink { ChartsView(ticker: ticker) } label: {
+                        Label("Chart", systemImage: "chart.xyaxis.line")
+                    }
+                    NavigationLink { OptionsChainView(ticker: ticker) } label: {
+                        Label("Options", systemImage: "list.number")
+                    }
+                    Button { practice.openTicket(ticker: ticker) } label: {
+                        Label("Practice Order", systemImage: "cart")
+                    }
                 }
                 .buttonStyle(.bordered)
                 if let info {

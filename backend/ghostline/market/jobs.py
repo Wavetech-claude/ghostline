@@ -61,7 +61,7 @@ class Jobs:
         if not tickers:
             return {"quotes": 0}
         tradier: Tradier = self.sources["tradier"]
-        quotes = self._call("tradier", "quotes", tradier.quotes, tickers)
+        quotes = self._call("tradier", "quotes", tradier.quotes, tickers + store.tracked_option_symbols(self.db))
         source = "tradier"
         if not quotes:
             alpaca: Alpaca = self.sources["alpaca"]

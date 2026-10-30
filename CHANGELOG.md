@@ -2,6 +2,15 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.4.0] — unreleased
+
+- The practice account: order tickets (market, limit, stop, stop-limit; day or good-till-cancelled) filled at the
+  real bid and ask from the stored quotes, next-business-day settlement in a cash account (unsettled proceeds cannot
+  buy), cash-secured puts with their collateral locked, assignment or expiry from the stored price, a fee per order
+  as a setting (default 0). Every opening order goes through the risk rules and a refusal names the rule; closing
+  orders only need the position. Option expirations and chains from Tradier with the collateral each put needs and
+  whether the book covers it. Screens: Practice account, the order ticket, the options chain.
+
 ## [0.3.0] — unreleased
 
 - Market data: the worker pulls daily bars, delayed quotes, news, earnings and SEC filings for every holding and

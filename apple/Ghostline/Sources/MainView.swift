@@ -5,9 +5,11 @@ import SwiftUI
 struct MainView: View {
     @Environment(SessionModel.self) private var session
     @Environment(LedgerModel.self) private var ledger
+    @Environment(PracticeModel.self) private var practice
 
     var body: some View {
         @Bindable var ledger = ledger
+        @Bindable var practice = practice
         TabView {
                     Tab("Today", systemImage: "sun.horizon") {
                         NavigationStack { TodayView() }
@@ -31,6 +33,7 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
         .sheet(isPresented: $ledger.showingTradeForm) { TradeFormView() }
         .sheet(isPresented: $ledger.showingCashFlow) { CashFlowSheet() }
+        .sheet(isPresented: $practice.showingTicket) { OrderTicketView() }
     }
 }
 

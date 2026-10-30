@@ -10,11 +10,13 @@ struct GhostlineApp: App {
     #endif
     @State private var session: SessionModel
     @State private var ledger: LedgerModel
+    @State private var practice: PracticeModel
 
     init() {
         let s = SessionModel.fromBundle()
         _session = State(initialValue: s)
         _ledger = State(initialValue: LedgerModel(client: s.client))
+        _practice = State(initialValue: PracticeModel(client: s.client))
     }
 
     var body: some Scene {
@@ -22,6 +24,7 @@ struct GhostlineApp: App {
             RootView()
                 .environment(session)
                 .environment(ledger)
+                .environment(practice)
                 .task { pushDelegate.session = session }
         }
         #if os(macOS)
@@ -34,6 +37,10 @@ struct GhostlineApp: App {
                 Button("Add Money…") { ledger.showingCashFlow = true }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(!session.isSignedIn)
+                Divider()
+                Button("Practice Order…") { practice.openTicket() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(!session.isSignedIn)
             }
         }
         #endif
@@ -42,6 +49,7 @@ struct GhostlineApp: App {
             NavigationStack { SettingsView() }
                 .environment(session)
                 .environment(ledger)
+                .environment(practice)
                 .frame(minWidth: 480, minHeight: 360)
         }
         #endif
