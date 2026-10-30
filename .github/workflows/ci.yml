@@ -1,0 +1,159 @@
+name: CI
+
+# The two job names are the required checks on `main` (`backend`, `apps`): branch protection and the merge robot wait
+# for exactly these. Rename one and nothing merges. No trigger-level paths filter: a documentation-only change still
+# reports both checks and skips the heavy steps inside each job (scripts/ci/docs-only.sh).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Run in the image the Dockerfile ships, so a version-specific break cannot pass CI and fail in the image.
+    container:
+      image: python:3.12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ghostline
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ghostline_test
+        options: >-
+          --health-cmd "pg_isready -U ghostline -d ghostline_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect a documentation-only change
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; else base="$PUSH_BEFORE"; fi
+          bash scripts/ci/docs-only.sh "$base" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Install
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: backend
+        run: pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir --no-deps -e . && pip install --no-cache-dir "pytest>=8,<10" "ruff>=0.6,<1"
+
+      - name: Lint
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: backend
+        run: ruff check .
+
+      - name: Test
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: backend
+        env:
+          GHOSTLINE_TEST_DATABASE_URL: postgresql://ghostline:ci@postgres:5432/ghostline_test
+        run: pytest -q -p no:cacheprovider
+
+      # The migrations on an empty database, then /health must answer 200: what staging and production will do.
+      - name: Migrations on an empty database, then health
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://ghostline:ci@postgres:5432/ghostline_test
+          GHOSTLINE_SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+          GHOSTLINE_OWNER_APPLE_ID: qa+owner@example.com
+        run: |
+          python - <<'PY'
+          import psycopg
+          from fastapi.testclient import TestClient
+          from ghostline import migrate
+          from ghostline.config import load
+          from ghostline.main import create_app
+          s = load()
+          with psycopg.connect(s.database_url, autocommit=True) as conn:
+              conn.execute("DROP SCHEMA public CASCADE"); conn.execute("CREATE SCHEMA public")
+          with psycopg.connect(s.database_url) as conn:
+              print("applied:", migrate.apply(conn, s.migrations_dir))
+          with TestClient(create_app(s)) as c:
+              r = c.get("/health"); print(r.status_code, r.json())
+              assert r.status_code == 200 and r.json()["status"] == "ok"
+          PY
+
+      - name: Version file and changelog agree
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          echo "VERSION=$v"
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::VERSION is not x.y.z"; exit 1; }
+          grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section ## [$v]"; exit 1; }
+
+  apps:
+    name: apps
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect a documentation-only change
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; else base="$PUSH_BEFORE"; fi
+          bash scripts/ci/docs-only.sh "$base" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Xcode
+        if: steps.scope.outputs.docs_only != 'true'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.1.app 2>/dev/null || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
+
+      - name: XcodeGen
+        if: steps.scope.outputs.docs_only != 'true'
+        run: brew install xcodegen && xcodegen --version
+
+      - name: Generate the project
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: apple
+        run: xcodegen generate --spec project.yml
+
+      - name: Package tests (GhostlineKit)
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: apple
+        run: swift test --package-path GhostlineKit
+
+      - name: Build and test, iOS
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: apple
+        run: |
+          dest="$(xcrun simctl list devices available | grep -m1 -oE 'iPhone 1[0-9][^(]*' | sed 's/ *$//')"
+          echo "destination: $dest"
+          xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Debug \
+            -destination "platform=iOS Simulator,name=$dest" CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/dd-ios" test
+
+      - name: Build and test, macOS
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: apple
+        run: |
+          xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Debug \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/dd-mac" test

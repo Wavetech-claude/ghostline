@@ -1,0 +1,3 @@
+// Release builds (TestFlight) point at production.
+GHOSTLINE_API_BASE_URL = https:/$()/ghostline.atwavetech.com
+GHOSTLINE_ENVIRONMENT = production
