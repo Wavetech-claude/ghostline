@@ -23,11 +23,10 @@ from zoneinfo import ZoneInfo
 from ghostline import occ
 from ghostline.claude.jobs import enqueue
 from ghostline.db import Database
-from ghostline.practice import next_business_day
+from ghostline.market.calendar import WEEKDAYS, Calendar
 
 logger = logging.getLogger("ghostline.learning")
 PT = ZoneInfo("America/Los_Angeles")
-OPEN = dt.time(6, 30)
 FUND = "SPY"
 PCT = Decimal("0.0001")
 UNPRICED_AFTER_DAYS = 10
@@ -42,12 +41,12 @@ def settings(db: Database) -> dict[str, Decimal]:
     return out
 
 
-def next_open(made: dt.datetime) -> dt.date:
+def next_open(made: dt.datetime, cal: Calendar = WEEKDAYS) -> dt.date:
     """The session whose open follows the moment the idea was made (a 06:20 PT scan trades at that day's open)."""
-    local = made.astimezone(PT)
-    if local.weekday() < 5 and local.time() < OPEN:
-        return local.date()
-    return next_business_day(local.date())
+    day = made.astimezone(PT).date()
+    if cal.is_session(day) and made < cal.opens_at(day):
+        return day
+    return cal.next_session(day)
 
 
 def raw_weight(expectancy: Decimal) -> Decimal:
@@ -83,13 +82,14 @@ class Learning:
     # ── the journal ──
     def open_results(self) -> int:
         """A pending result for every idea that has none yet: every idea the scan made, passed or refused (the
-        module's call is what is measured; the owner's rules decide what he trades)."""
+        module's call is what is measured; the owner's rules decide what the owner trades)."""
         rows = self.db.fetch_all(
             "SELECT i.id, i.ticker, i.lane, i.module, i.created_at, s.horizon_days FROM ideas i "
             "JOIN signals s ON s.id = i.signal_id LEFT JOIN paper_results p ON p.idea_id = i.id WHERE p.idea_id IS NULL"
         )
+        cal = Calendar.load(self.db)
         for r in rows:
-            opened = next_open(r["created_at"])
+            opened = next_open(r["created_at"], cal)
             closes = opened + dt.timedelta(days=int(r["horizon_days"] or 0))
             self.db.execute(
                 "INSERT INTO paper_results (idea_id, ticker, lane, module, opened_on, closes_on) "

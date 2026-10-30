@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from ghostline import indicators
 from ghostline.auth import OwnerSub
 from ghostline.market import store
+from ghostline.market.calendar import Calendar
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import configured
 
@@ -108,4 +109,6 @@ def unwatch(ticker: str, request: Request, sub: str = OwnerSub) -> dict:
 @router.get("/market/status")
 def market_status(request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
-    return {"configured": configured(), "pulls": Limiter(db).status(), "tracked": store.tracked_tickers(db)}
+    cal = Calendar.load(db)
+    return {"configured": configured(), "pulls": Limiter(db).status(), "tracked": store.tracked_tickers(db),
+            "calendar_through": cal.last.isoformat() if cal.last else None}

@@ -44,7 +44,7 @@ struct IdeasView: View {
                 }
             } else if let all, all.lastScan.day == nil {
                 ContentUnavailableView("No scan yet", systemImage: "lightbulb",
-                                       description: Text("The worker scans every weekday at 06:20 PT. You can run one now."))
+                                       description: Text("The worker scans every trading day at 06:20 PT. You can run one now."))
             } else if let error {
                 Text(error).foregroundStyle(.secondary)
             } else {

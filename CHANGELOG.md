@@ -2,6 +2,15 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.11.0] — unreleased
+
+- Market holidays and early closes. The app reads the exchange calendar (Alpaca's, a year ahead, refreshed every
+  morning) instead of treating every weekday as a trading day. On a holiday (the next is Thanksgiving, 2026-11-26)
+  the scan, the AI trader, practice fills, "Invest this" and the brief do nothing and say why. A plan for a closed
+  day moves to the next session. Practice day orders expire, and fills stop, at the real close, 10:00 PT on an
+  early-close day. Sale proceeds settle on the exchange's settlement date, so a sale on 11-25 settles on 11-27.
+  Paper trades open at the next real session, and the value-over-time chart has no point on a holiday.
+
 ## [0.10.1] — unreleased
 
 - Fixed: a data source's key could be written into the pull log and the worker's log. A failed call's error text

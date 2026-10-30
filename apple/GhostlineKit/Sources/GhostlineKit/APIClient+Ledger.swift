@@ -41,7 +41,7 @@ public extension APIClient {
         try await get("/positions/\(book)/\(ticker)", authenticated: true)
     }
 
-    /// A book's value each weekday, its time-weighted return, and SPY's return over the same days.
+    /// A book's value each trading day, its time-weighted return, and SPY's return over the same days.
     func series(book: String) async throws -> BookSeries {
         try await get("/series", query: [URLQueryItem(name: "book", value: book)], authenticated: true)
     }

@@ -10,6 +10,7 @@ import httpx
 
 from ghostline.db import Database
 from ghostline.market import NotConfigured, RateLimited, store, utcnow
+from ghostline.market.calendar import Calendar
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import ALL, FMP, FRED, GDELT, Alpaca, Edgar, Finnhub, Massive, Tradier
 
@@ -105,9 +106,7 @@ class Jobs:
         """One Massive grouped-daily pull of the whole market: the most traded names (by dollar volume) above $10
         that moved at least 2% that day become today's scan universe, beside the tracked tickers."""
         massive: Massive = self.sources["massive"]
-        day = day or (dt.date.today() - dt.timedelta(days=1))
-        while day.weekday() >= 5:
-            day -= dt.timedelta(days=1)
+        day = day or Calendar.load(self.db).previous_session(dt.date.today())
         grouped = self._call("massive", "grouped-daily", massive.grouped_daily, day)
         if not grouped:
             return {"universe": 0, "reason": "no grouped pull"}
@@ -123,6 +122,17 @@ class Jobs:
         rows.sort(key=lambda r: -r["dollar_volume"])
         n = store.save_universe(self.db, dt.date.today(), rows[:size])
         return {"universe": n, "day": day.isoformat()}
+
+    def pull_calendar(self, today: dt.date | None = None) -> dict:
+        """The exchange calendar from 10 days back to about 13 months ahead, in one call."""
+        today = today or dt.date.today()
+        start, end = today - dt.timedelta(days=10), today + dt.timedelta(days=400)
+        alpaca: Alpaca = self.sources["alpaca"]
+        sessions = self._call("alpaca", "calendar", alpaca.calendar, start, end)
+        if not sessions:
+            return {"sessions": 0}
+        return {"sessions": store.save_sessions(self.db, sessions, start, end, "alpaca", utcnow()),
+                "through": sessions[-1].day.isoformat()}
 
     def pull_macro(self) -> dict:
         fred: FRED = self.sources["fred"]

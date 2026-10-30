@@ -22,6 +22,14 @@ class SourceError(Exception):
 
 
 @dataclass(frozen=True)
+class MarketSession:
+    day: dt.date
+    opens_at: dt.datetime
+    closes_at: dt.datetime
+    settles_on: dt.date
+
+
+@dataclass(frozen=True)
 class Bar:
     ts: dt.datetime
     open: Decimal

@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 
 from ghostline import ledger, risk, risk_service
 from ghostline.db import Database
-from ghostline.practice import Practice, next_business_day
+from ghostline.market.calendar import WEEKDAYS, Calendar
+from ghostline.practice import Practice
 
 PT = ZoneInfo("America/Los_Angeles")
 MAX_SPLITS = 5
@@ -22,10 +23,10 @@ SHARES = Decimal("0.000001")
 LANES = ("long", "swing")
 
 
-def default_date(now: dt.datetime | None = None) -> dt.date:
-    """Tomorrow's session: the next weekday (exchange holidays are not known; the market calendar is not built)."""
+def default_date(now: dt.datetime | None = None, cal: Calendar = WEEKDAYS) -> dt.date:
+    """Tomorrow's session: the next day the market is open."""
     local = (now or dt.datetime.now(dt.UTC)).astimezone(PT)
-    return next_business_day(local.date())
+    return cal.next_session(local.date())
 
 
 def _weights(scores: list[Decimal]) -> list[Decimal]:
@@ -114,7 +115,10 @@ class Planner:
 
     def plan(self, amount: Decimal, for_date: dt.date | None, book: str) -> dict:
         amount = ledger.money(amount)
-        for_date = for_date or default_date()
+        cal = Calendar.load(self.db)
+        for_date = for_date or default_date(cal=cal)
+        if not cal.is_session(for_date):
+            for_date = cal.next_session(for_date)           # a closed day (a holiday): the next session
         ideas = self.candidates()
         splits: list[dict] = []
         if ideas:
