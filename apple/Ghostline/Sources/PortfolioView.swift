@@ -46,6 +46,11 @@ struct PortfolioView: View {
             }
         }
         .navigationTitle("Portfolio")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink { HistoryView() } label: { Label("History", systemImage: "list.bullet.rectangle") }
+            }
+        }
         .task { await ledger.loadPortfolio() }
         .refreshable { await ledger.loadPortfolio() }
     }

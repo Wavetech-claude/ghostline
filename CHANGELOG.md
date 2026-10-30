@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.5.0] — unreleased
+
+- Ideas and modules: the borrowed methods are code (`backend/ghostline/modules`, their sources and licences in
+  `modules/vendor`): Minervini's VCP, O'Neil's CANSLIM, post-earnings drift, the earnings-reaction score, the
+  macro regime from cross-asset ratios and the yield curve, and cash-secured puts rechecked with Black–Scholes.
+  Every module writes the same signal record with its reason and evidence, and names what it could not measure.
+  The weekday scan (06:20 PT) reads one Massive grouped pull for the day's movers plus the tracked tickers, and
+  turns actionable signals into ideas in three lanes (long term, swings, sell puts), sized to the balance through
+  the risk rules; a refused idea stays visible with the rule and reason. An Ideas tab with the lanes, each idea's
+  levels and evidence, and a way into practice. History moved under Portfolio; Settings under Account on iPhone.
+  Not built: the dual-listed gap (NSE data).
+
 ## [0.4.0] — unreleased
 
 - The practice account: order tickets (market, limit, stop, stop-limit; day or good-till-cancelled) filled at the

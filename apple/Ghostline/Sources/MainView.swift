@@ -14,20 +14,17 @@ struct MainView: View {
                     Tab("Today", systemImage: "sun.horizon") {
                         NavigationStack { TodayView() }
                     }
-                    Tab("Portfolio", systemImage: "chart.pie") {
-                        NavigationStack { PortfolioView() }
+                    Tab("Ideas", systemImage: "lightbulb") {
+                        NavigationStack { IdeasView() }
                     }
                     Tab("Watchlist", systemImage: "eye") {
                         NavigationStack { WatchlistView() }
                     }
-                    Tab("History", systemImage: "list.bullet.rectangle") {
-                        NavigationStack { HistoryView() }
+                    Tab("Portfolio", systemImage: "chart.pie") {
+                        NavigationStack { PortfolioView() }
                     }
                     Tab("Account", systemImage: "person.crop.circle") {
                         NavigationStack { AccountView() }
-                    }
-                    Tab("Settings", systemImage: "slider.horizontal.3") {
-                        NavigationStack { SettingsView() }
                     }
         }
         .tabViewStyle(.sidebarAdaptable)
