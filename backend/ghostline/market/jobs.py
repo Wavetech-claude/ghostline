@@ -23,10 +23,9 @@ PUT_DTE = (30, 45)
 
 
 class Jobs:
-    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None,
-                 env: str | None = None) -> None:
+    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None) -> None:
         self.db = db
-        self.limiter = Limiter(db, env)
+        self.limiter = Limiter(db)
         self.sources = sources or {name: cls(http) for name, cls in ALL.items()}
 
     def _call(self, source: str, endpoint: str, fn, *args, wait: bool = True) -> Any:

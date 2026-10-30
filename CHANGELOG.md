@@ -2,6 +2,13 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.11.1] — unreleased
+
+- Only production pulls market data. Staging reads production's database, copied over staging's every day after the
+  close by a job on the host, so one set of keys is spent once. Staging's worker registers no pull job, and
+  production takes each source's whole free limit again (it took 80 % while staging pulled too). GDELT's two
+  environments no longer need different minutes.
+
 ## [0.11.0] — unreleased
 
 - Market holidays and early closes. The app reads the exchange calendar (Alpaca's, a year ahead, refreshed every

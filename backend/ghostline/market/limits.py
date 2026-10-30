@@ -3,7 +3,6 @@ before it is made (RateLimited), so a job never burns the day's budget on one ti
 instead (check(wait=True)), so a long list is paced rather than cut; a day's limit is never waited for."""
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
 
@@ -21,27 +20,15 @@ LIMITS: dict[str, tuple[int | None, int | None]] = {
     "tradier": (120, None),
     "gdelt": (1, 12),           # stricter in practice than its published one every 5 s: see Jobs.pull_tone
 }
-
-# One key per source serves both environments, and each counts only its own calls (its own data_pulls). So each takes
-# a fixed share of every limit and the two together stay inside it; anywhere else (tests, a laptop) gets the whole
-# limit. A limit of 1 cannot be split: GDELT's two environments ask at different minutes instead (worker/schedule.py).
-SHARES = {"prod": 0.8, "staging": 0.2}
+# Only production pulls: staging reads production's data, copied every night (worker/schedule.py), so production
+# alone spends each key's free limit.
 MAX_WAIT_S = 65
 
 
-def share(env: str | None = None) -> float:
-    return SHARES.get(os.environ.get("GHOSTLINE_ENV", "") if env is None else env, 1.0)
-
-
 class Limiter:
-    def __init__(self, db: Database, env: str | None = None, sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(self, db: Database, sleep: Callable[[float], None] = time.sleep) -> None:
         self.db = db
-        self.share = share(env)
         self.sleep = sleep
-
-    def limits(self, source: str) -> tuple[int | None, int | None]:
-        """This environment's share of the source's (per minute, per day) limits."""
-        return tuple(None if n is None else max(1, int(n * self.share)) for n in LIMITS.get(source, (None, None)))
 
     def used(self, source: str, seconds: int) -> int:
         row = self.db.fetch_one("SELECT count(*) AS n FROM data_pulls WHERE source = %s AND status <> 'skipped' "
@@ -49,7 +36,7 @@ class Limiter:
         return int(row["n"]) if row else 0
 
     def check(self, source: str, wait: bool = False) -> None:
-        per_minute, per_day = self.limits(source)
+        per_minute, per_day = LIMITS.get(source, (None, None))
         if per_day is not None and self.used(source, 86400) >= per_day:
             raise RateLimited(f"{source}: {per_day} calls a day reached")
         waited = 0.0
