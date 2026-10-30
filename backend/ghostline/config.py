@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     apns_key_p8: str = Field(default="", alias="APNS_KEY_P8")
     apns_topic: str = Field(default="com.wavetech.ghostline", alias="APNS_TOPIC")
 
+    # Claude in the worker: headless `claude -p` on the subscription token (CLAUDE_CODE_OAUTH_TOKEN, read by the runner
+    # from the environment, never stored here); Langfuse over its ingestion API, project `ghostline`
+    claude_model: str = Field(default="claude-sonnet-5-5", alias="GHOSTLINE_CLAUDE_MODEL")
+    claude_judge_model: str = Field(default="claude-opus-5-5", alias="GHOSTLINE_CLAUDE_JUDGE_MODEL")
+    langfuse_host: str = Field(default="", alias="LANGFUSE_HOST")
+    langfuse_public_key: str = Field(default="", alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str = Field(default="", alias="LANGFUSE_SECRET_KEY")
+
     @property
     def is_production(self) -> bool:
         return self.ghostline_env == "prod"

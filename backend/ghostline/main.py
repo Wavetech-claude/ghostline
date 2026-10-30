@@ -16,6 +16,7 @@ from ghostline.config import Settings, load
 from ghostline.db import Database
 from ghostline.routes import attachments as attachments_routes
 from ghostline.routes import auth as auth_routes
+from ghostline.routes import claude as claude_routes
 from ghostline.routes import devices as devices_routes
 from ghostline.routes import ideas as ideas_routes
 from ghostline.routes import ledger as ledger_routes
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
     app.include_router(market_routes.router)
     app.include_router(practice_routes.router)
     app.include_router(ideas_routes.router)
+    app.include_router(claude_routes.router)
 
     @app.get("/version")
     def version() -> dict:

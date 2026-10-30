@@ -106,6 +106,10 @@ struct TickerView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                NavigationLink { DeepDiveView(ticker: ticker) } label: {
+                    Label("Should I Buy?", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
                 if let info {
                     if !info.earnings.isEmpty {
                         SectionHeader("Earnings")
