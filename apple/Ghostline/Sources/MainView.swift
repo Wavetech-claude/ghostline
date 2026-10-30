@@ -37,6 +37,8 @@ struct MainView: View {
 struct TodayView: View {
     @Environment(SessionModel.self) private var session
     @Environment(LedgerModel.self) private var ledger
+    @State private var investing = false
+    @State private var todos: [TodoItem] = []
 
     var body: some View {
         ScrollView {
@@ -52,6 +54,23 @@ struct TodayView: View {
                     }
                 }
                 BriefCard()
+                if !todos.isEmpty {
+                    NavigationLink { TodoListView() } label: {
+                        ContentCard {
+                            Label("\(todos.count) to place at your broker", systemImage: "checklist")
+                                .font(.headline)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                ContentCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Invest an Amount", systemImage: "dollarsign.circle").font(.headline)
+                        Text("Say how much and when; the app splits it across today's ideas through your rules.")
+                            .foregroundStyle(.secondary)
+                        Button("Invest This") { investing = true }.buttonStyle(.bordered)
+                    }
+                }
                 ContentCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Connected", systemImage: "checkmark.seal")
@@ -69,6 +88,8 @@ struct TodayView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Today")
+        .sheet(isPresented: $investing) { InvestSheet() }
+        .task { todos = (try? await session.client.todos()) ?? [] }
         .task { await ledger.loadRules() }
         .refreshable { await session.refreshBackend(); await ledger.loadRules() }
     }

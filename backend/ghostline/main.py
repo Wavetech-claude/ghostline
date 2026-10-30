@@ -14,11 +14,14 @@ from ghostline import migrate, storage
 from ghostline.auth import Auth
 from ghostline.config import Settings, load
 from ghostline.db import Database
+from ghostline.routes import ai as ai_routes
+from ghostline.routes import alerts as alerts_routes
 from ghostline.routes import attachments as attachments_routes
 from ghostline.routes import auth as auth_routes
 from ghostline.routes import claude as claude_routes
 from ghostline.routes import devices as devices_routes
 from ghostline.routes import ideas as ideas_routes
+from ghostline.routes import invest as invest_routes
 from ghostline.routes import ledger as ledger_routes
 from ghostline.routes import market as market_routes
 from ghostline.routes import practice as practice_routes
@@ -62,6 +65,9 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
     app.include_router(practice_routes.router)
     app.include_router(ideas_routes.router)
     app.include_router(claude_routes.router)
+    app.include_router(invest_routes.router)
+    app.include_router(ai_routes.router)
+    app.include_router(alerts_routes.router)
 
     @app.get("/version")
     def version() -> dict:

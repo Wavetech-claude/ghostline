@@ -24,6 +24,7 @@ SETTLE_HOUR = dt.time(6, 30)        # funds from a sale are usable at the next b
 CLOSE = dt.time(13, 0)              # the session's close, Pacific time
 BUYING = ("buy", "buy_to_close")
 OPENING = ("buy", "sell_to_open")
+SIMULATED_BOOKS = ("practice", "ai", "options")   # the real book is placed by the owner at the broker, never here
 
 
 # ── pure rules ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -183,6 +184,8 @@ class Practice:
         """Validate, run the risk rules for an opening order, check the cash account, store the order, and fill it at
         once when the stored quote allows. The answer is the order row; a refusal carries its reason."""
         book_kind = o.get("book", "practice")
+        if book_kind not in SIMULATED_BOOKS:
+            raise ValueError(f"{book_kind} is not a simulated book: real money is placed at the broker")
         book_id = self.book_id(book_kind)
         symbol = o.get("option_symbol")
         opt = None
@@ -275,11 +278,11 @@ class Practice:
         why = f"{rule}: {reason}" if rule else reason
         row = self.db.fetch_one(
             "INSERT INTO orders (book_id, ticker, asset, side, type, tif, quantity, limit_price, stop_price, "
-            "stop_loss, option_symbol, status, reason, note) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s) RETURNING *",
+            "stop_loss, option_symbol, status, reason, note, idea_id, lane) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
+            "%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
             (book_id, o["ticker"], o["asset"], o["side"], o.get("type", "market"), o.get("tif", "day"),
              o["quantity"], o.get("limit_price"), o.get("stop_price"), o.get("stop_loss"), o.get("option_symbol"),
-             status, why, o.get("note")))
+             status, why, o.get("note"), o.get("idea_id"), o.get("lane")))
         with self.db.connection() as conn:
             conn.commit()
         return row
@@ -303,12 +306,15 @@ class Practice:
         now = dt.datetime.now(dt.UTC)
         fee = self.fee()
         with self.db.connection() as conn:
+            filled = (f"order {order['id']} filled at the {'ask' if order['side'] in BUYING else 'bid'} "
+                      f"({quote['source']}, quote of {quote['ts'].isoformat()})")
+            note = f"{order['note']} · {filled}" if order.get("note") else filled
             t = conn.execute(
                 "INSERT INTO trades (book_id, ticker, asset, side, quantity, fill, at, fees, broker, note, "
-                "option_symbol) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'practice', %s, %s) RETURNING id",
+                "option_symbol, idea_id, lane) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'practice', %s, %s, %s, %s) "
+                "RETURNING id",
                 (order["book_id"], order["ticker"], order["asset"], order["side"], order["quantity"], price, now, fee,
-                 f"order {order['id']} filled at the {'ask' if order['side'] in BUYING else 'bid'} "
-                 f"({quote['source']}, quote of {quote['ts'].isoformat()})", order.get("option_symbol"))).fetchone()
+                 note, order.get("option_symbol"), order.get("idea_id"), order.get("lane"))).fetchone()
             if order["side"] not in BUYING:
                 m = Decimal(100) if order["asset"] == "option" else Decimal(1)
                 proceeds = ledger.money(Decimal(order["quantity"]) * price * m - fee)
@@ -349,7 +355,7 @@ class Practice:
         the underlying's stored price is under the strike, expired worthless otherwise. No stored price, no action."""
         today = today or dt.date.today()
         out = {"assigned": 0, "expired": 0, "waiting": 0}
-        for b in self.db.fetch_all("SELECT id FROM books WHERE kind IN ('practice', 'ai')"):
+        for b in self.db.fetch_all("SELECT id FROM books WHERE kind IN ('practice', 'ai', 'options')"):
             for symbol, n in self.short_legs(b["id"]).items():
                 try:
                     opt = occ.parse(symbol)

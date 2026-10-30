@@ -16,6 +16,18 @@ final class LedgerModel {
     var filters = TradeFilters()
     var showingTradeForm = false      // the trade sheet, opened from History or the menu bar (⌘N)
     var showingCashFlow = false       // the cash sheet, opened from Account or the menu bar (⇧⌘N)
+    var cashFlowBook: String?         // the book the cash sheet opens on (AI trader, options practice)
+    var prefillTodo: TodoItem?        // "I Placed It": the trade sheet opens filled from this to-do item
+
+    func logPlaced(_ todo: TodoItem) {
+        prefillTodo = todo
+        showingTradeForm = true
+    }
+
+    func addMoney(to book: String) {
+        cashFlowBook = book
+        showingCashFlow = true
+    }
 
     init(client: APIClient) { self.client = client }
 
@@ -46,6 +58,11 @@ final class LedgerModel {
             self.books = try await self.client.books()
         }
         return made
+    }
+
+    /// Marks a to-do item placed, linked to the real trade that closed it.
+    func closeTodo(_ todo: TodoItem, tradeId: Int) async {
+        _ = await run { _ = try await self.client.closeTodo(id: todo.id, tradeId: tradeId) }
     }
 
     func saveRules(_ inputs: [RuleInput]) async -> Bool {
@@ -84,6 +101,12 @@ enum Show {
     static func percent(_ s: String?) -> String {
         guard let s, let d = Decimal(string: s) else { return "—" }
         return "\(d.formatted(.number.precision(.fractionLength(0...2))))%"
+    }
+
+    /// A decimal string without trailing zeros, for a form field: "100.0500" → "100.05".
+    static func plainNumber(_ s: String) -> String {
+        guard let d = Decimal(string: s) else { return s }
+        return NSDecimalNumber(decimal: d).stringValue
     }
 
     static func quantity(_ s: String) -> String {

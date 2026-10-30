@@ -118,8 +118,10 @@ def filings_for(db: Database, ticker: str, limit: int = 30) -> list[dict]:
 
 
 def tracked_tickers(db: Database) -> list[str]:
-    """Every ticker the owner holds in any book or watches, plus the underlying of every open option leg."""
+    """Every ticker the owner holds in any book, watches or has an active price alert on, plus the underlying of
+    every open option leg."""
     rows = db.fetch_all("SELECT ticker FROM positions UNION SELECT ticker FROM watchlist UNION "
+                        "SELECT ticker FROM alerts WHERE status = 'active' UNION "
                         "SELECT ticker FROM trades WHERE asset = 'option' GROUP BY book_id, ticker, option_symbol "
                         "HAVING SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) > 0 ORDER BY 1")
     return [r["ticker"] for r in rows]

@@ -11,6 +11,7 @@ struct IdeasView: View {
     @State private var regime: SignalRow?
     @State private var error: String?
     @State private var scanning = false
+    @State private var investing = false
 
     private let lanes = [("long", "Long Term"), ("swing", "Swings"), ("puts", "Sell Puts")]
 
@@ -53,10 +54,14 @@ struct IdeasView: View {
         .navigationTitle("Ideas")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button { investing = true } label: { Label("Invest This", systemImage: "dollarsign.circle") }
+            }
+            ToolbarItem(placement: .secondaryAction) {
                 Button { Task { await scan() } } label: { Label("Scan Now", systemImage: "arrow.triangle.2.circlepath") }
                     .disabled(scanning)
             }
         }
+        .sheet(isPresented: $investing) { InvestSheet() }
         .task { await load() }
         .refreshable { await load() }
     }

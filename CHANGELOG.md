@@ -2,6 +2,20 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.7.0] — unreleased
+
+- Invest this: any amount and a date, split across the current long-term and swing ideas (the best score takes the
+  biggest share), in fractional shares, every split through the risk rules against the book the money goes into; a
+  refused split shows its rule and its money moves to the splits that pass. Approved into practice (deposited, then
+  placed at the open of its date) or onto a to-do list for real money; "I Placed It" opens the trade form filled in.
+- The AI trader: a practice book funded with any amount. It takes the app's open ideas, each sized from the rules as a
+  share of its own balance, and exits at the idea's stop, target or horizon; every trade carries its idea and reason.
+  Its S&P 500 ghost buys SPY with the same deposits on the same dates; both are compared by time-weighted return.
+  Copy repeats a trade in practice at the same share of the balance; for real money only once its lane graduates.
+- Options practice on any amount: its own book; each weekday it sells the put ideas the amount can cover.
+- Price alerts (above, below, a day's move, crossing a moving average, earnings coming), checked every half hour in
+  the session and pushed once. Monthly statements per book as JSON, CSV and PDF (dividends are not tracked yet).
+
 ## [0.6.0] — unreleased
 
 - Claude in the worker: headless `claude -p` on the subscription token, on an allow-listed environment, never an
