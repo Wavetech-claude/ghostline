@@ -2,6 +2,14 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.3.0] — unreleased
+
+- Market data: the worker pulls daily bars, delayed quotes, news, earnings and SEC filings for every holding and
+  watched ticker from the sources whose keys are set (Tradier, Alpaca, Finnhub, FMP, Massive, FRED, EDGAR), inside
+  each source's free-tier limit, and stores every row with its source and as-of time. Charts with candles or a line,
+  timeframes from a week to five years, volume, SMA 20/50/200, RSI, MACD, Bollinger bands and support and resistance
+  from pivot clusters. A Watchlist tab: any ticker, its latest quote, its chart, news, earnings and filings.
+
 ## [0.2.0] — unreleased
 
 - Account and ledger: the four books (Real, Practice, AI trader, S&P 500 ghost), deposits and withdrawals of any

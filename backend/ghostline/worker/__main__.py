@@ -18,6 +18,7 @@ import ghostline
 from ghostline import migrate
 from ghostline.config import Settings, load
 from ghostline.db import Database
+from ghostline.worker import schedule
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ghostline.worker")
@@ -69,7 +70,9 @@ def main() -> int:
         done = migrate.apply(conn, settings.migrations_dir)
     logger.info("migrations applied: %s", ", ".join(done) or "none pending")
     scheduler = BackgroundScheduler(timezone="America/Los_Angeles")
+    registered = schedule.register(scheduler, db)
     scheduler.start()
+    logger.info("jobs registered: %s", ", ".join(registered))
     logger.info("worker up: env=%s version=%s commit=%s jobs=%d", settings.ghostline_env, ghostline.__version__,
                 ghostline.commit(), len(scheduler.get_jobs()))
     try:
