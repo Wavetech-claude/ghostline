@@ -2,6 +2,20 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.10.0] — unreleased
+
+- GDELT news tone now arrives. GDELT's real limit is much stricter than the "one request every 5 seconds" it
+  publishes: it refused even our first request in 46 minutes, for about 12 minutes. The tone is now its own job: at
+  most one topic per run, every 30 minutes from midnight to 04:30 PT, never a retry inside a run, at most one call a
+  minute and 12 a day. Staging asks 15 minutes after production, because GDELT sees both as one address. One answer
+  holds a week of days, so a refused night fills itself in.
+- Fixed: two option contracts on one stock (say a 100 put and a 90 put) shared one queue of lots, so closing one
+  could book the other's premium. Each contract now closes against its own lots.
+- Fixed: on a chart, a daily bar sat under the previous day's label west of New York (bars are stamped at New York
+  midnight). Bars and value-over-time points now sit on their own trading day in every time zone.
+- The S&P 500 line on the return charts is gray: green and red mean gain and loss everywhere else in the app.
+  A holding's row labels its open P&L beside today's.
+
 ## [0.9.0] — unreleased
 
 - Day P&L: the portfolio shows each position's and each book's change since the previous session's close. A share

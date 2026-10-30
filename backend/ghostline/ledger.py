@@ -29,11 +29,13 @@ class Trade:
     fill: Decimal
     fees: Decimal
     at: Any
+    option_symbol: str | None = None    # options: the contract; each contract is its own lot queue
 
     @classmethod
     def from_row(cls, r: dict) -> Trade:
         return cls(id=r["id"], book_id=r["book_id"], ticker=r["ticker"], asset=r["asset"], side=r["side"],
-                   quantity=Decimal(r["quantity"]), fill=Decimal(r["fill"]), fees=Decimal(r["fees"] or 0), at=r["at"])
+                   quantity=Decimal(r["quantity"]), fill=Decimal(r["fill"]), fees=Decimal(r["fees"] or 0), at=r["at"],
+                   option_symbol=r.get("option_symbol"))
 
     @property
     def opens(self) -> bool:
@@ -103,14 +105,15 @@ class Book:
 
 
 def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
-    """FIFO per (book, ticker, asset): opening trades become lots; closing trades consume them oldest first. A close
-    larger than the open lots closes what exists (the ledger says what it has, never what it guesses). A short leg
+    """FIFO per (book, ticker, asset, option contract): opening trades become lots; closing trades consume them
+    oldest first. A close larger than the open lots closes what exists (the ledger says what it has, never what it
+    guesses). A short leg
     (sold to open) carries its premium as a negative cost and its close pays, so its proceeds are negative; the
     P&L is proceeds minus cost either way."""
-    lots: dict[tuple[int, str, str], list[Lot]] = defaultdict(list)
+    lots: dict[tuple[int, str, str, str], list[Lot]] = defaultdict(list)
     closed: list[Closed] = []
     for t in sorted(trades, key=lambda x: (x.at, x.id)):
-        key = (t.book_id, t.ticker, t.asset)
+        key = (t.book_id, t.ticker, t.asset, t.option_symbol or "")     # two puts on one stock never share lots
         m = t.multiplier
         if t.opens:
             fee_per_unit = t.fees / t.quantity if t.quantity else Decimal(0)
@@ -135,7 +138,7 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
             closed.append(Closed(t.id, t.book_id, t.ticker, closed_qty, money(proceeds), money(cost), t.at,
                                  tuple(dict.fromkeys(matched))))
     positions = []
-    for (book_id, ticker, asset), open_lots in lots.items():
+    for (book_id, ticker, asset, _), open_lots in lots.items():
         qty = sum((lot.quantity for lot in open_lots), Decimal(0))
         if qty > 0 and asset == "stock":
             basis = sum((lot.quantity * lot.cost_per_unit for lot in open_lots), Decimal(0))

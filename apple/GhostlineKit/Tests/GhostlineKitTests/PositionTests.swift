@@ -52,4 +52,26 @@ import Testing
         #expect(Stamp.day("2026-10-29T03:30:00Z", in: la).contains("28"))   // 20:30 on the 28th in Los Angeles
         #expect(Stamp.day("2026-10-29T03:30:00Z", in: utc).contains("29"))
     }
+
+    @Test(arguments: ["America/Los_Angeles", "Asia/Kolkata", "UTC"])
+    func aDailyBarSitsOnItsOwnSessionDay(zone: String) throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = try #require(TimeZone(identifier: zone))
+        for stamp in ["2026-10-01T04:00:00+00:00",     // New York midnight in summer time
+                      "2026-12-01T05:00:00Z",          // and in winter time
+                      "2026-09-01"] {                  // a series point: the day as written
+            let d = try #require(Stamp.tradingDay(stamp, in: cal))
+            #expect(cal.component(.day, from: d) == 1 && cal.component(.hour, from: d) == 0, "\(stamp) in \(zone)")
+        }
+        #expect(Stamp.tradingDay("not a date", in: cal) == nil)
+    }
+
+    @Test func barsAndSeriesPointsUseTheirTradingDay() throws {
+        let bar = try GhostlineJSON.decoder().decode(BarRow.self, from: Data(#"{"ts":"2026-10-01T04:00:00+00:00","open":"1","high":"1","low":"1","close":"1","volume":"1","source":"alpaca","as_of":"2026-10-01T22:00:00+00:00"}"#.utf8))
+        let point = try GhostlineJSON.decoder().decode(SeriesPoint.self, from: Data(#"{"date":"2026-10-01","value":"1","net_flow":"0","twr_pct":"0","spy_pct":null}"#.utf8))
+        for d in [try #require(bar.date), try #require(point.day)] {
+            // the raw instant would be 04:00 in UTC and 21:00 the day before in Pacific time: never local midnight
+            #expect(Calendar.current.component(.day, from: d) == 1 && Calendar.current.component(.hour, from: d) == 0)
+        }
+    }
 }

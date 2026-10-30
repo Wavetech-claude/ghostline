@@ -124,7 +124,7 @@ def test_jobs_skip_unconfigured_sources_and_store_the_rest(fresh_db, monkeypatch
     db = Database(settings())
     http, _ = fake_http()
     db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL')")
-    jobs = Jobs(db, http, sleep=lambda _: None)
+    jobs = Jobs(db, http)
     assert jobs.pull_bars() == {"tickers": 1, "bars": 2}
     out = jobs.pull_quotes()
     assert out == {"quotes": 1, "source": "alpaca"}            # Tradier skipped (no key), Alpaca answered
@@ -187,7 +187,7 @@ def test_the_worker_registers_the_plans_schedule(fresh_db):
     db = Database(settings())
     sch = BackgroundScheduler(timezone="America/Los_Angeles")
     ids = schedule.register(sch, db)
-    assert ids == ["pull_macro", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
+    assert ids == ["pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
     quotes = sch.get_job("pull_quotes")
     assert "day_of_week='mon-fri'" in str(quotes.trigger) and "hour='6-13'" in str(quotes.trigger)
     assert str(schedule.PT) == "America/Los_Angeles"
@@ -267,18 +267,69 @@ def test_the_chain_pull_stops_when_tradier_is_not_configured(fresh_db, monkeypat
     db.close()
 
 
-def test_the_macro_pull_adds_gdelt_tone_spaced_inside_its_limit(fresh_db, keys):
+def _gdelt(answers):
+    """A GDELT that answers from a list (a status code or the recorded answer), and the queries it was asked."""
+    asked = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.gdeltproject.org":
-            return httpx.Response(200, json=GDELT_ANSWER)
-        return httpx.Response(200, json=ANSWERS["api.stlouisfed.org/fred/series/observations"])
+        if request.url.host != "api.gdeltproject.org":
+            return httpx.Response(404)
+        asked.append(request.url.params["query"])
+        a = answers.pop(0)
+        if a == 429:
+            return httpx.Response(429, text="Please limit requests to one every 5 seconds or contact ...")
+        return httpx.Response(200, json=GDELT_ANSWER)
+    return httpx.Client(transport=httpx.MockTransport(handler)), asked
+
+
+def test_the_tone_pull_asks_for_one_stale_topic_per_run(fresh_db):
     db = Database(settings())
-    waits = []
-    out = Jobs(db, httpx.Client(transport=httpx.MockTransport(handler)), sleep=waits.append).pull_macro()
-    assert out == {"points": 2 * 6, "tone_points": 2 * 3}
-    assert waits == [6, 6]                                       # GDELT asks for one request every 5 seconds
-    rows = db.fetch_all("SELECT series FROM macro_series WHERE source = 'gdelt' ORDER BY series, ts")
-    assert {r["series"] for r in rows} == {'gdelt:"stock market"', 'gdelt:"India economy"', 'gdelt:"Federal Reserve"'}
+    http, asked = _gdelt([200, 200, 200])
+    jobs = Jobs(db, http)
+    day = dt.date(2026, 10, 24)                      # the recorded answer's newest day
+    for _ in range(3):
+        db.execute("DELETE FROM data_pulls")         # the per-minute cap is tested below
+        assert jobs.pull_tone(today=day)["points"] == 2
+    assert asked == ['"stock market"', '"India economy"', '"Federal Reserve"']
+    assert jobs.pull_tone(today=day) == {"asked": None, "points": 0, "stale": 0}       # all fresh: no request
+    assert len(asked) == 3
+    assert jobs.pull_tone(today=day + dt.timedelta(days=1))["asked"] == '"stock market"'   # next day starts over
+    db.close()
+
+
+def test_a_refused_tone_pull_stops_and_never_retries_inside_the_minute(fresh_db):
+    db = Database(settings())
+    http, asked = _gdelt([429])
+    jobs = Jobs(db, http)
+    assert jobs.pull_tone(today=dt.date(2026, 10, 24)) == {"asked": '"stock market"', "points": 0, "stale": 3}
+    assert jobs.pull_tone(today=dt.date(2026, 10, 24))["points"] == 0                   # refused by our own cap
+    assert asked == ['"stock market"']                                                  # one request reached GDELT
+    pulls = [(p["status"]) for p in db.fetch_all("SELECT status FROM data_pulls WHERE source = 'gdelt' ORDER BY id")]
+    assert pulls == ["error", "skipped"]
+    db.close()
+
+
+def test_the_macro_pull_no_longer_calls_gdelt(fresh_db, keys):
+    db = Database(settings())
+    http, asked = _gdelt([])
+    jobs = Jobs(db, http)
+    jobs.pull_macro()
+    assert asked == []
+    db.close()
+
+
+def test_staging_and_production_ask_gdelt_at_different_minutes(fresh_db):
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from ghostline.worker import schedule
+    db = Database(settings())
+    minutes = {}
+    for env in ("staging", "prod"):
+        sch = BackgroundScheduler(timezone="America/Los_Angeles")
+        schedule.register(sch, db, settings=settings(GHOSTLINE_ENV=env))
+        minutes[env] = str(sch.get_job("pull_tone").trigger)
+    assert "minute='15,45'" in minutes["staging"] and "minute='0,30'" in minutes["prod"]
+    assert "hour='0-4'" in minutes["prod"]                         # every run lands before the 05:30 brief
     db.close()
 
 

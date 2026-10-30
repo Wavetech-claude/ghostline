@@ -317,6 +317,24 @@ public enum Stamp {
         return d.formatted(style)
     }
 
+    /// A trading day as a chart's x value: local midnight of the day the stamp names, so a chart in any zone puts the
+    /// mark under its own day's label. A daily bar is stamped at New York midnight (04:00 or 05:00 UTC, both data
+    /// providers), which in Pacific time is the evening before; a date with no time is the day as written.
+    public static func tradingDay(_ iso: String, in calendar: Calendar = .current) -> Date? {
+        var source = Calendar(identifier: .gregorian)
+        let parts: DateComponents
+        if let instant = date(iso) {
+            source.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+            parts = source.dateComponents([.year, .month, .day], from: instant)
+        } else if let day = try? Date(iso, strategy: .iso8601.year().month().day()) {
+            source.timeZone = TimeZone(identifier: "UTC") ?? .current
+            parts = source.dateComponents([.year, .month, .day], from: day)
+        } else {
+            return nil
+        }
+        return calendar.date(from: parts)
+    }
+
     /// "Oct 30, 2026 at 2:30 PM" style, or the raw string when it cannot be read.
     public static func short(_ iso: String?) -> String {
         guard let iso, let d = date(iso) else { return iso ?? "—" }

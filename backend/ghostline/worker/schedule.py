@@ -78,6 +78,9 @@ def register(
 
     plan = [
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
+        # GDELT sees staging and production as one address (both run on prod): they ask at different minutes
+        ("pull_tone", j.pull_tone,
+         CronTrigger(hour="0-4", minute="15,45" if settings.ghostline_env == "staging" else "0,30", timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
         ("pull_news_earnings", j.pull_news_earnings, CronTrigger(hour=6, minute=0, timezone=PT)),
