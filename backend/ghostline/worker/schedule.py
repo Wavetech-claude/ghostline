@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
@@ -19,6 +20,7 @@ from ghostline.ghost import Ghost
 from ghostline.ideas import Scan
 from ghostline.invest import Planner
 from ghostline.learning import Learning, weekly_digest
+from ghostline.market.calendar import NEW_YORK, Calendar
 from ghostline.market.jobs import Jobs
 from ghostline.practice import Practice
 
@@ -70,6 +72,11 @@ def register(
             db.execute("UPDATE weekly_digests SET pushed_at = now() WHERE id = %s", (d["id"],))
         return {**d, "push": sent}
 
+    def fill_orders() -> dict:
+        if not before_close(Calendar.load(db), dt.datetime.now(dt.UTC)):
+            return {"skipped": "after the close: practice orders fill only while the market is open"}
+        return p.fill_open_orders()
+
     def scan_ideas() -> dict:
         s = Scan(db)
         out = s.run()
@@ -77,6 +84,7 @@ def register(
         return out
 
     plan = [
+        ("pull_calendar", j.pull_calendar, CronTrigger(hour=4, minute=50, timezone=PT)),
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
         # GDELT sees staging and production as one address (both run on prod): they ask at different minutes
         ("pull_tone", j.pull_tone,
@@ -91,7 +99,7 @@ def register(
         # practice: fill open orders on the fresh quotes, then close the session (day orders, settlement, expiries)
         (
             "fill_orders",
-            p.fill_open_orders,
+            fill_orders,
             CronTrigger(day_of_week="mon-fri", hour="6-13", minute="3,33", timezone=PT),
         ),
         ("close_session", p.close_session, CronTrigger(day_of_week="mon-fri", hour=13, minute=5, timezone=PT)),
@@ -113,6 +121,8 @@ def register(
         ("weekly_digest", digest_and_push, CronTrigger(day_of_week="sun", hour=7, minute=30, timezone=PT)),
     ]
     for job_id, fn, trigger in plan:
+        if "day_of_week='mon-fri'" in str(trigger):
+            fn = on_sessions(db, fn)
         scheduler.add_job(
             fn,
             trigger,
@@ -124,3 +134,20 @@ def register(
             misfire_grace_time=600,
         )
     return [p[0] for p in plan]
+
+
+def before_close(cal: Calendar, now: dt.datetime) -> bool:
+    """Whether today's session has not closed yet. An early close (13:00 New York, 10:00 PT) ends it early."""
+    today = now.astimezone(NEW_YORK).date()
+    return cal.is_session(today) and now < cal.closes_at(today)
+
+
+def on_sessions(db: Database, fn: Any) -> Any:
+    """A weekday job is a session job: on a day the exchange is closed (a holiday) it does nothing and says why."""
+    def run() -> Any:
+        today = dt.datetime.now(NEW_YORK).date()
+        if not Calendar.load(db).is_session(today):
+            return {"skipped": f"the market is closed on {today.isoformat()}"}
+        return fn()
+    run.__name__ = getattr(fn, "__name__", "session_job")
+    return run

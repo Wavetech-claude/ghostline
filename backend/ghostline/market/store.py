@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from ghostline.db import Database
-from ghostline.market import Bar, Earning, Filing, MacroPoint, NewsItem, Quote
+from ghostline.market import Bar, Earning, Filing, MacroPoint, MarketSession, NewsItem, Quote
 
 
 def save_bars(db: Database, ticker: str, timeframe: str, bars: list[Bar], source: str, as_of: dt.datetime) -> int:
@@ -78,6 +78,20 @@ def save_macro(db: Database, points: list[MacroPoint], source: str, as_of: dt.da
                          "as_of = EXCLUDED.as_of", (p.series, p.ts, p.value, source, as_of))
         conn.commit()
     return len(points)
+
+
+def save_sessions(db: Database, sessions: list[MarketSession], start: dt.date, end: dt.date, source: str,
+                  as_of: dt.datetime) -> int:
+    """The calendar from start to end, replaced as one: a day the answer no longer holds (a closure announced later)
+    stops being a session."""
+    with db.connection() as conn:
+        conn.execute("DELETE FROM market_sessions WHERE day BETWEEN %s AND %s", (start, end))
+        for s in sessions:
+            conn.execute("INSERT INTO market_sessions (day, opens_at, closes_at, settles_on, source, as_of) "
+                         "VALUES (%s, %s, %s, %s, %s, %s)",
+                         (s.day, s.opens_at, s.closes_at, s.settles_on, source, as_of))
+        conn.commit()
+    return len(sessions)
 
 
 def save_fundamentals(db: Database, ticker: str, payload: dict, source: str, as_of: dt.datetime) -> None:

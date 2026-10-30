@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from ghostline import occ, practice, risk
+from ghostline.market.calendar import NEW_YORK, Calendar
 from ghostline.market.sources import Tradier
 from ghostline.practice import Practice, fill_price, next_business_day, settles_at
 from tests.conftest import TEST_DB, sign_in
@@ -226,9 +227,11 @@ def test_limit_and_stop_orders_wait_for_the_quote_and_day_orders_expire(client):
     assert set(o["status"] for o in client.get("/practice/orders", headers=h).json()["orders"]) == {"open", "refused"}
     acct = client.get("/practice/account", headers=h).json()
     assert len(acct["open_orders"]) == 2
-    # the close: the day order expires, the GTC one stays
-    tomorrow = dt.datetime.now(dt.UTC) + dt.timedelta(days=1)
-    assert p.close_session(tomorrow)["expired_orders"] == 1
+    # the close: the day order expires, the GTC one stays. "The close" is the next session's (an order placed after
+    # today's close, or on a weekend, belongs to the next session), so this holds at any hour of any day
+    cal = Calendar.load(client.app.state.db)
+    after = cal.closes_at(cal.next_session(dt.datetime.now(NEW_YORK).date())) + dt.timedelta(minutes=1)
+    assert p.close_session(after)["expired_orders"] == 1
     assert client.get("/practice/orders?status=expired", headers=h).json()["orders"][0]["id"] == day["id"]
     # the market comes down to the limit: the GTC order fills at the ask
     quote("AAPL", "89.4", "89.5")

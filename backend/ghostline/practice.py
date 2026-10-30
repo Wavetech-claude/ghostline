@@ -3,7 +3,9 @@ settlement in a cash account, cash-secured puts with their collateral locked, as
 expiry from the stored price. Nothing real moves. Every fill becomes an ordinary trade in the ledger, so history,
 the portfolio and the risk checks read practice and real money the same way.
 
-The pure part (fill rules, the settlement calendar) has no database; the engine below reads and writes one.
+The pure part (fill rules, the settlement calendar) has no database; the engine below reads and writes one. Days,
+opening and closing times and settlement dates come from the exchange calendar (ghostline.market.calendar): a holiday
+is no session, an early close ends the session early.
 """
 from __future__ import annotations
 
@@ -17,11 +19,10 @@ from zoneinfo import ZoneInfo
 from ghostline import ledger, occ, prices, risk, risk_service
 from ghostline.db import Database
 from ghostline.ledger import Trade
+from ghostline.market.calendar import NEW_YORK, WEEKDAYS, Calendar
 
 logger = logging.getLogger("ghostline.practice")
 PT = ZoneInfo("America/Los_Angeles")
-SETTLE_HOUR = dt.time(6, 30)        # funds from a sale are usable at the next business day's open
-CLOSE = dt.time(13, 0)              # the session's close, Pacific time
 BUYING = ("buy", "buy_to_close")
 OPENING = ("buy", "sell_to_open")
 SIMULATED_BOOKS = ("practice", "ai", "options")   # the real book is placed by the owner at the broker, never here
@@ -53,22 +54,19 @@ def fill_price(side: str, kind: str, bid: Decimal | None, ask: Decimal | None, l
     return Fill(market, triggered)
 
 
-def next_business_day(d: dt.date) -> dt.date:
-    """The next weekday. Exchange holidays are not known here (the market calendar is not built)."""
-    n = d + dt.timedelta(days=1)
-    while n.weekday() >= 5:
-        n += dt.timedelta(days=1)
-    return n
+def next_business_day(d: dt.date, cal: Calendar = WEEKDAYS) -> dt.date:
+    """The next session after `d`."""
+    return cal.next_session(d)
 
 
-def settles_at(filled_at: dt.datetime) -> dt.datetime:
-    """T+1: the open of the next business day, Pacific time."""
-    local = filled_at.astimezone(PT)
-    return dt.datetime.combine(next_business_day(local.date()), SETTLE_HOUR, tzinfo=PT)
+def settles_at(filled_at: dt.datetime, cal: Calendar = WEEKDAYS) -> dt.datetime:
+    """T+1: funds from a sale are usable at the open of its settlement day."""
+    return cal.opens_at(cal.settles_on(filled_at.astimezone(NEW_YORK).date()))
 
 
-def session_close(day: dt.date) -> dt.datetime:
-    return dt.datetime.combine(day, CLOSE, tzinfo=PT)
+def session_close(day: dt.date, cal: Calendar = WEEKDAYS) -> dt.datetime:
+    """The close of `day`'s session, or of the last session before it when the market was closed that day."""
+    return cal.closes_at(day if cal.is_session(day) else cal.previous_session(day))
 
 
 # ── the engine ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -319,7 +317,7 @@ class Practice:
                 m = Decimal(100) if order["asset"] == "option" else Decimal(1)
                 proceeds = ledger.money(Decimal(order["quantity"]) * price * m - fee)
                 conn.execute("INSERT INTO settlements (trade_id, amount, settles_at) VALUES (%s, %s, %s)",
-                             (t["id"], proceeds, settles_at(now)))
+                             (t["id"], proceeds, settles_at(now, Calendar.load(self.db))))
             conn.execute("UPDATE orders SET status = 'filled', filled_at = %s, fill_price = %s, trade_id = %s "
                          "WHERE id = %s", (now, price, t["id"], order["id"]))
             conn.commit()
@@ -342,11 +340,7 @@ class Practice:
 
     def expire_day_orders(self, now: dt.datetime | None = None) -> int:
         """A day order still open after its session's close expires."""
-        now = now or dt.datetime.now(dt.UTC)
-        close = session_close(now.astimezone(PT).date())
-        if now < close:
-            close = session_close(next_business_day(now.astimezone(PT).date()) - dt.timedelta(days=1))
-            close = close if close <= now else session_close(now.astimezone(PT).date() - dt.timedelta(days=1))
+        close = Calendar.load(self.db).last_close(now or dt.datetime.now(dt.UTC))
         return self.db.execute("UPDATE orders SET status = 'expired', reason = 'day order not filled by the close' "
                                "WHERE status = 'open' AND tif = 'day' AND placed_at <= %s", (close,))
 
@@ -374,7 +368,7 @@ class Practice:
         return out
 
     def _close_leg(self, book_id: int, opt: occ.Option, n: Decimal, assigned: bool, price: Decimal) -> None:
-        at = dt.datetime.combine(opt.expiry, CLOSE, tzinfo=PT)
+        at = session_close(opt.expiry, Calendar.load(self.db))     # a holiday expiry: the session before it
         kind = "assignment" if assigned else "expiry"
         with self.db.connection() as conn:
             opened = conn.execute("SELECT id FROM trades WHERE book_id = %s AND option_symbol = %s AND "

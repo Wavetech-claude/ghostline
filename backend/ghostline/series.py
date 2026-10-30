@@ -1,4 +1,4 @@
-"""A book's value over time and its time-weighted return. Each weekday since the book's first flow: cash plus every
+"""A book's value over time and its time-weighted return. Each trading day since the book's first flow: cash plus every
 stock holding at that day's stored close (the last close before it; the last fill when no bar is stored). Deposits
 and withdrawals count at the start of their day, so they never look like gains or losses. Short puts carry their
 premium as cash and are not marked to market (stored option prices are snapshots, not a daily series)."""
@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from ghostline.db import Database
+from ghostline.market.calendar import Calendar
 
 CENT = Decimal("0.01")
 
@@ -60,14 +61,15 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
     last_fill: dict[str, Decimal] = {}
     points: list[dict[str, Any]] = []
     growth, prev_value = Decimal(1), None
-    # flows and trades dated on a weekend count on the next weekday
+    # flows and trades dated on a day the market was closed (a weekend, a holiday) count on the next session
+    cal = Calendar.load(db)
     pending_flow = Decimal(0)
     pending_trades: list[dict] = []
     d = start
     while d <= end:
         pending_flow += flow_by_day.get(d, Decimal(0))
         pending_trades += trades_by_day.get(d, [])
-        if d.weekday() >= 5:
+        if not cal.is_session(d):
             d += dt.timedelta(days=1)
             continue
         flow = pending_flow

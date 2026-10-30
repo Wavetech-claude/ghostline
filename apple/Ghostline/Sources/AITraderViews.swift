@@ -49,7 +49,7 @@ struct AITraderView: View {
                 Section("Trades") {
                     ForEach(a.trades) { t in TraderTradeRow(trade: t, copy: { to in Task { await copy(t, to) } }) }
                     if a.trades.isEmpty {
-                        Text("No trades yet. Fund the book; it trades the app's open ideas each weekday after the 06:20 scan.")
+                        Text("No trades yet. Fund the book; it trades the app's open ideas each trading day after the 06:20 scan.")
                             .foregroundStyle(.secondary)
                     }
                     if let copied { Text(copied).font(.footnote).foregroundStyle(.secondary) }
@@ -193,7 +193,7 @@ struct OptionsPracticeView: View {
                     LabeledContent("Puts Sold", value: "\(a.state.shortPuts)")
                     if let t = a.twrPct { LabeledContent("Return, Time-Weighted", value: "\(t)%") }
                 } footer: {
-                    Text("Add any amount. Each weekday after the scan it sells the put ideas the amount can cover, one contract each.")
+                    Text("Add any amount. Each trading day after the scan it sells the put ideas the amount can cover, one contract each.")
                 }
                 Section("Trades") {
                     ForEach(a.trades) { TraderTradeRow(trade: $0) }

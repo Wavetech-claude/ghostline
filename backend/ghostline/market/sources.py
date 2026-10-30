@@ -8,6 +8,7 @@ is stored in data_pulls and logged (FMP's key reached staging's data_pulls that 
 
 Endpoints (read 2026-10, each a public free tier):
   Alpaca   https://data.alpaca.markets/v2  bars, latest quotes (IEX feed)   keys: APCA-API-KEY-ID + APCA-API-SECRET-KEY
+           https://paper-api.alpaca.markets/v2/calendar  the exchange calendar (the key is a paper key)
   Massive  https://api.massive.com/v2       grouped daily bars (the whole market in one call), 5/min
   FMP      https://financialmodelingprep.com/stable  profile, ratios, income, earnings history, 250/day
            (free plan, checked 2026-10-30: earnings history at most 5 quarters, and not for every symbol)
@@ -24,12 +25,26 @@ import logging
 import os
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from ghostline.market import Bar, Earning, Filing, MacroPoint, NewsItem, NotConfigured, Quote, SourceError, dec
+from ghostline.market import (
+    Bar,
+    Earning,
+    Filing,
+    MacroPoint,
+    MarketSession,
+    NewsItem,
+    NotConfigured,
+    Quote,
+    SourceError,
+    dec,
+)
 
 UA = "Ghostline/0.2 (personal research tool; contact: owner)"
+TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
+NEW_YORK = ZoneInfo("America/New_York")
 
 # httpx logs every request's whole address at INFO, and FRED's key travels in its query: the worker logs at INFO and
 # its log goes to Loki, so httpx speaks only from WARNING up in any process that calls a source.
@@ -116,6 +131,23 @@ class Alpaca(Source):
             ts = _stamp(b.get("t"))
             if ts:
                 out.append(Bar(ts, dec(b["o"]), dec(b["h"]), dec(b["l"]), dec(b["c"]), dec(b.get("v")) or Decimal(0)))
+        return out
+
+    def calendar(self, start: dt.date, end: dt.date) -> list[MarketSession]:
+        """Every session from start to end: open and close in New York time (early closes included) and the day a sale
+        made in it settles. A weekday missing from the answer is a closed day."""
+        j = self.fetch(TRADING + "/calendar", params={"start": start.isoformat(), "end": end.isoformat()},
+                       headers=self._headers())
+        out = []
+        for d in j or []:
+            day, settles = _date(d.get("date")), _date(d.get("settlement_date"))
+            try:
+                opens, closes = dt.time.fromisoformat(d["open"]), dt.time.fromisoformat(d["close"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if day and settles:
+                out.append(MarketSession(day, dt.datetime.combine(day, opens, tzinfo=NEW_YORK),
+                                         dt.datetime.combine(day, closes, tzinfo=NEW_YORK), settles))
         return out
 
     def quotes(self, tickers: list[str]) -> list[Quote]:

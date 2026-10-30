@@ -27,7 +27,7 @@ struct BriefCard: View {
                 } else if let error {
                     Text(error).foregroundStyle(.secondary)
                 } else if answer != nil {
-                    Text("No brief yet. The worker writes one every weekday at 05:30 PT, or write one now.")
+                    Text("No brief yet. The worker writes one every trading day at 05:30 PT, or write one now.")
                         .foregroundStyle(.secondary)
                     Button("Write It Now") { Task { await writeNow() } }.buttonStyle(.bordered)
                 } else {
