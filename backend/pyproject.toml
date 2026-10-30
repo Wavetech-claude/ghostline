@@ -30,6 +30,10 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["ghostline*"]
 
+# Files the code reads at run time. The image builds without .git, so nothing but this list puts them in the package.
+[tool.setuptools.package-data]
+"ghostline.claude.prompts" = ["*.md"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
