@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-import time
 from typing import Any
 
 import httpx
@@ -17,17 +16,14 @@ from ghostline.market.sources import ALL, FMP, FRED, GDELT, Alpaca, Edgar, Finnh
 logger = logging.getLogger("ghostline.jobs")
 
 MACRO_SERIES = ("DGS10", "DGS2", "CPIAUCSL", "DEXINUS", "UNRATE", "FEDFUNDS")   # rates, CPI, USD/INR, jobs, policy
-# GDELT world news tone for the brief's backdrop (no key; one request every 5 seconds, its own published limit)
+# GDELT world news tone for the brief's backdrop (no key): one topic per run of pull_tone, see there
 TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
-GDELT_SPACING_S = 6
 PUT_DTE = (30, 45)
 
 
 class Jobs:
-    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None,
-                 sleep=time.sleep) -> None:
+    def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None) -> None:
         self.db = db
-        self.sleep = sleep
         self.limiter = Limiter(db)
         self.sources = sources or {name: cls(http) for name, cls in ALL.items()}
 
@@ -128,20 +124,33 @@ class Jobs:
 
     def pull_macro(self) -> dict:
         fred: FRED = self.sources["fred"]
-        out = {"points": 0, "tone_points": 0}
+        out = {"points": 0}
         since = dt.date.today() - dt.timedelta(days=5 * 365)
         for series in MACRO_SERIES:
             pts = self._call("fred", f"series/{series}", fred.series, series, since)
             if pts:
                 out["points"] += store.save_macro(self.db, pts, "fred", utcnow())
-        gdelt: GDELT = self.sources["gdelt"]
-        for i, q in enumerate(TONE_QUERIES):
-            if i:
-                self.sleep(GDELT_SPACING_S)
-            pts = self._call("gdelt", "timelinetone", gdelt.tone, q, 7)
-            if pts:
-                out["tone_points"] += store.save_macro(self.db, pts, "gdelt", utcnow())
         return out
+
+    def pull_tone(self, today: dt.date | None = None) -> dict:
+        """GDELT world news tone, at most one topic per run. GDELT's real limiter is much stricter than the "one request
+        every 5 seconds" it publishes: on 2026-10-30 it refused our first request in 46 minutes, at 10:25:45 PT, and
+        every request until 10:36; outside measurements saw 1 success in 7 at 6-second spacing, blocks of up to about
+        25 minutes, and retries inside a block keeping it shut. So a run asks for the stalest topic only, never retries,
+        and stops at a refusal; the worker runs it every 30 minutes overnight, before the brief. One answer carries a
+        week of days, so a night GDELT refuses fills itself in on the next answer."""
+        today = today or dt.datetime.now(dt.UTC).date()      # GDELT dates its hours in UTC
+        rows = self.db.fetch_all("SELECT series, max(ts) AS newest FROM macro_series WHERE source = 'gdelt' "
+                                 "GROUP BY series")
+        newest = {r["series"]: r["newest"] for r in rows}
+        stale = [q for q in TONE_QUERIES if (newest.get(f"gdelt:{q}") or dt.date.min) < today]
+        if not stale:
+            return {"asked": None, "points": 0, "stale": 0}
+        q = min(stale, key=lambda s: newest.get(f"gdelt:{s}") or dt.date.min)     # ties: the first in TONE_QUERIES
+        gdelt: GDELT = self.sources["gdelt"]
+        pts = self._call("gdelt", "timelinetone", gdelt.tone, q, 7)
+        return {"asked": q, "points": store.save_macro(self.db, pts, "gdelt", utcnow()) if pts else 0,
+                "stale": len(stale)}
 
     def pull_chains(self) -> dict:
         """Before the scan: for every stock the owner would happily own, the expiry 30 to 45 days out nearest 38

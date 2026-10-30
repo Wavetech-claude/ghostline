@@ -96,7 +96,7 @@ struct PositionRow: View {
                     Text("\(Show.signedMoney(day)) today").foregroundStyle(PnLRow.tint(day))
                 }
                 if let pnl = position.unrealizedPnl {
-                    Text(Show.signedMoney(pnl)).foregroundStyle(Show.isGain(pnl) == true ? .green : .red)
+                    Text("\(Show.signedMoney(pnl)) open").foregroundStyle(PnLRow.tint(pnl))
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
@@ -171,6 +171,8 @@ struct BookReturnChart: View {
             }
             RuleMark(y: .value("Zero", 0)).foregroundStyle(.gray.opacity(0.3))
         }
+        // green and red mean gain and loss in this app, so the benchmark is a neutral, dashed line
+        .chartForegroundStyleScale(domain: [name, "S&P 500"], range: [Color.accentColor, Color.gray])
         .chartYAxisLabel("time-weighted return, %")
         .accessibilityLabel("Time-weighted return of \(name) against the S&P 500")
     }

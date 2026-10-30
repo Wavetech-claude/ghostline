@@ -14,7 +14,7 @@ public struct BarRow: Codable, Sendable, Equatable, Identifiable {
     public let source: String
     public let asOf: String
 
-    public var date: Date? { Stamp.date(ts) }
+    public var date: Date? { Stamp.tradingDay(ts) }    // a daily bar: its session's day
 }
 
 public struct Level: Codable, Sendable, Equatable, Identifiable {

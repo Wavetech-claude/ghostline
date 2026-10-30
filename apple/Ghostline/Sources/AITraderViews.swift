@@ -134,6 +134,8 @@ struct ReturnChart: View {
             }
             RuleMark(y: .value("Zero", 0)).foregroundStyle(.gray.opacity(0.3))
         }
+        // green and red mean gain and loss in this app, so the benchmark is a neutral, dashed line
+        .chartForegroundStyleScale(domain: ["AI trader", "S&P 500 ghost"], range: [Color.accentColor, Color.gray])
         .chartYAxisLabel("time-weighted return, %")
         .accessibilityLabel("Time-weighted return of the AI trader against the S&P 500 ghost")
     }

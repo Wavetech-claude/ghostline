@@ -145,3 +145,19 @@ def test_suggestions_are_shares_counts_and_switches_never_dollars():
     s = risk.suggestions()
     assert {x["kind"] for x in s} == {"share", "count", "switch"}
     assert all(Decimal(x["suggested"]) < 1 for x in s if x["kind"] == "share")
+
+
+def test_two_puts_on_one_stock_close_against_their_own_contract():
+    """Each option contract is its own lot queue: closing the 90 put never consumes the 100 put sold before it."""
+    def put(id_, side, symbol, fill, minutes):
+        return Trade(id=id_, book_id=1, ticker="AAPL", asset="option", side=side, quantity=Decimal("1"),
+                     fill=Decimal(fill), fees=Decimal("0"), at=T0 + dt.timedelta(minutes=minutes), option_symbol=symbol)
+    trades = [put(1, "sell_to_open", "AAPL261218P00100000", "2.00", 0),
+              put(2, "sell_to_open", "AAPL261218P00090000", "0.50", 1),
+              put(3, "buy_to_close", "AAPL261218P00090000", "0.10", 2)]
+    (c,) = ledger.settle(trades)[0]
+    assert c.opened_trade_ids == (2,)                         # the 90 put, not the older 100 put
+    assert c.pnl == Decimal("40.00")                          # (0.50 − 0.10) × 100 kept
+    assert Trade.from_row({"id": 9, "book_id": 1, "ticker": "AAPL", "asset": "option", "side": "sell_to_open",
+                           "quantity": 1, "fill": 1, "fees": 0, "at": T0,
+                           "option_symbol": "AAPL261218P00090000"}).option_symbol == "AAPL261218P00090000"
