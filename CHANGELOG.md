@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.6.0] — unreleased
+
+- Claude in the worker: headless `claude -p` on the subscription token, on an allow-listed environment, never an
+  API key. Jobs queue in the database and the worker drains them one at a time; inside a job up to four calls run
+  at once. "Should I buy?" on any ticker: four analysts (fundamentals, technical, news, macro) read one bundle of
+  stored numbers, a bull and a bear argue, a judge decides Buy, Wait or Avoid, sized from the owner's rules, with
+  what would change the call. Every number in a memo, a chat answer or the brief must match a stored value; any
+  other number is struck and shown as struck, the judge gets one retry, and a buy on an unstored number becomes a
+  wait. Follow-up chat per ticker. The morning brief at 05:30 PT on weekdays, pushed to the apps in production.
+  "Read It and Fill the Form" on a confirmation screenshot or PDF: Claude may read that one file and nothing else.
+  Not wired: Langfuse tracing (the worker cannot reach it with certificate checking; see the build report).
+
 ## [0.5.0] — unreleased
 
 - Ideas and modules: the borrowed methods are code (`backend/ghostline/modules`, their sources and licences in

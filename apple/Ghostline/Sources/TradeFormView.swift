@@ -21,6 +21,8 @@ struct TradeFormView: View {
     @State private var importing = false
     @State private var attachment: (Data, String, String)?
     @State private var problem: String?
+    @State private var reading = false
+    @State private var readNote: String?
 
     private var sides: [(String, String)] {
         asset == "stock" ? [("buy", "Buy"), ("sell", "Sell")]
@@ -81,6 +83,12 @@ struct TradeFormView: View {
                 Section("Confirmation") {
                     if let attachment {
                         Label("\(attachment.1) · \(attachment.0.count.formatted(.byteCount(style: .file)))", systemImage: "paperclip")
+                        Button { Task { await readIt() } } label: {
+                            if reading { HStack(spacing: 8) { ProgressView(); Text("Reading…") } }
+                            else { Label("Read It and Fill the Form", systemImage: "sparkles") }
+                        }
+                        .disabled(reading)
+                        if let readNote { Text(readNote).font(.footnote).foregroundStyle(.secondary) }
                         Button("Remove", role: .destructive) { self.attachment = nil }
                     } else {
                         Button { importing = true } label: { Label("Attach a Screenshot or PDF", systemImage: "paperclip") }
@@ -118,6 +126,34 @@ struct TradeFormView: View {
         guard let data = try? Data(contentsOf: url) else { problem = "Could not read the file."; return }
         let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
         attachment = (data, url.lastPathComponent, type)
+    }
+
+    /// Claude reads the confirmation and fills the fields; the owner checks them before saving.
+    private func readIt() async {
+        guard let attachment else { return }
+        reading = true
+        defer { reading = false }
+        do {
+            let t = try await ledger.client.readConfirmation(data: attachment.0, filename: attachment.1, contentType: attachment.2)
+            let job = try await ledger.client.waitForJob(id: t.jobId)
+            guard job.status == "done", case .object(let r)? = job.result, case .object(let f)? = r["fields"] else {
+                readNote = job.error ?? "Could not read the confirmation."
+                return
+            }
+            func s(_ k: String) -> String? { if case .string(let v)? = f[k] { return v } else { return nil } }
+            if let v = s("ticker") { ticker = v }
+            if let v = s("asset"), ["stock", "option"].contains(v) { asset = v }
+            if let v = s("side"), sides.contains(where: { $0.0 == v }) { side = v }
+            if let v = s("quantity") { quantity = v }
+            if let v = s("fill") { fill = v }
+            if let v = s("fees") { fees = v }
+            if let v = s("broker") { broker = v }
+            if let v = s("option_symbol") { optionSymbol = v }
+            if let v = s("at"), let d = Stamp.date(v) { at = d }
+            readNote = "Filled from the confirmation. Check every field before saving." + (s("notes").map { " \($0)" } ?? "")
+        } catch {
+            readNote = (error as? GhostlineError)?.userMessage ?? error.localizedDescription
+        }
     }
 
     private func save() async {

@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
+from ghostline import storage
+from ghostline.claude.jobs import Jobs as ClaudeJobs
+from ghostline.claude.jobs import enqueue
+from ghostline.config import Settings, load
 from ghostline.db import Database
 from ghostline.ideas import Scan
 from ghostline.market.jobs import Jobs
@@ -14,10 +19,19 @@ from ghostline.practice import Practice
 PT = "America/Los_Angeles"
 
 
-def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: Practice | None = None) -> list[str]:
+def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: Practice | None = None,
+             settings: Settings | None = None, claude: ClaudeJobs | None = None) -> list[str]:
     """Add every job; returns their ids (tests read them). Each job is misfire-tolerant and never overlaps itself."""
     j = jobs or Jobs(db)
     p = practice or Practice(db)
+    settings = settings or load()
+    c = claude or ClaudeJobs(db, settings, storage.for_settings(settings))
+
+    def claude_poll() -> dict | None:
+        return c.run_next()
+
+    def morning_brief() -> int:
+        return enqueue(db, "brief", {"push": True})
     def scan_ideas() -> dict:
         s = Scan(db)
         out = s.run()
@@ -36,6 +50,9 @@ def register(scheduler: Any, db: Database, jobs: Jobs | None = None, practice: P
         ("fill_orders", p.fill_open_orders,
          CronTrigger(day_of_week="mon-fri", hour="6-13", minute="3,33", timezone=PT)),
         ("close_session", p.close_session, CronTrigger(day_of_week="mon-fri", hour=13, minute=5, timezone=PT)),
+        # Claude: the queue drains one job at a time; the brief is queued at 05:30 PT and pushed when written
+        ("claude_poll", claude_poll, IntervalTrigger(seconds=20)),
+        ("morning_brief", morning_brief, CronTrigger(day_of_week="mon-fri", hour=5, minute=30, timezone=PT)),
     ]
     for job_id, fn, trigger in plan:
         scheduler.add_job(fn, trigger, id=job_id, name=job_id, replace_existing=True, coalesce=True,

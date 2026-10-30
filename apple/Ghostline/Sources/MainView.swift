@@ -51,6 +51,7 @@ struct TodayView: View {
                         }
                     }
                 }
+                BriefCard()
                 ContentCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Connected", systemImage: "checkmark.seal")
@@ -58,7 +59,7 @@ struct TodayView: View {
                         if let backend = session.backend {
                             Text("Ghostline \(backend.shortDescription) on \(session.configuration.environment).")
                         }
-                        Text("The morning brief and your ideas arrive here as the app grows. Charts and news live in Watchlist.")
+                        Text("Ideas live in their tab; charts and news in Watchlist; ask “Should I buy?” on any ticker.")
                             .foregroundStyle(.secondary)
                     }
                 }
