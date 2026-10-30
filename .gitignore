@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+backend/.env
+
+# Xcode / XcodeGen
+apple/*.xcodeproj
+apple/**/xcuserdata/
+apple/DerivedData/
+apple/.build/
+apple/GhostlineKit/.build/
+apple/build/
+*.xcarchive
+*.ipa
+
+# OS
+.DS_Store
+Thumbs.db
