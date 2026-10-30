@@ -14,7 +14,7 @@ LIMITS: dict[str, tuple[int | None, int | None]] = {
     "edgar": (10, None),        # SEC asks for at most 10 requests a second; we keep well under
     "fred": (120, None),
     "tradier": (120, None),
-    "gdelt": (None, None),
+    "gdelt": (10, None),        # its own limit: one request every 5 seconds
 }
 
 

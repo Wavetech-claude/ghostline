@@ -2,9 +2,11 @@
 every price is unknown, and the app says so instead of showing a number."""
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ghostline.db import Database
 
@@ -15,6 +17,29 @@ class Price:
     price: Decimal
     source: str
     as_of: Any
+
+
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def session_day(ts: dt.datetime) -> dt.date:
+    """The New York trading date of a moment. Quotes are pulled on weekdays during the session (the worker's
+    schedule), so a quote's New York date is its session."""
+    return ts.astimezone(NEW_YORK).date()
+
+
+def previous_closes(db: Database, sessions: dict[str, dt.date]) -> dict[str, Decimal]:
+    """Per ticker, the last stored daily close strictly before its session. A bar's UTC date is its session date (both
+    data providers stamp a daily bar at New York midnight; the database role runs in UTC)."""
+    if not sessions:
+        return {}
+    tickers = list(sessions)
+    rows = db.fetch_all(
+        "SELECT DISTINCT ON (b.ticker) b.ticker, b.close FROM market_bars b "
+        "JOIN unnest(%s::text[], %s::date[]) AS w (ticker, day) ON w.ticker = b.ticker "
+        "WHERE b.timeframe = '1D' AND b.ts::date < w.day ORDER BY b.ticker, b.ts DESC",
+        (tickers, [sessions[t] for t in tickers]))
+    return {r["ticker"]: Decimal(r["close"]) for r in rows}
 
 
 def latest(db: Database, tickers: list[str]) -> dict[str, Price]:

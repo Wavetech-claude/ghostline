@@ -100,6 +100,7 @@ public struct EarningsRow: Codable, Sendable, Equatable, Identifiable {
     public let actual: String?
     public let source: String
     public let asOf: String
+    public let movePct: String?         // last close before the report to the first close after it
 }
 
 public struct FilingRow: Codable, Sendable, Equatable, Identifiable {

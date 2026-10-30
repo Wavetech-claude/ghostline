@@ -143,6 +143,7 @@ public struct PortfolioPosition: Codable, Sendable, Equatable, Identifiable {
     public let priceAsOf: String?
     public let value: String?
     public let unrealizedPnl: String?
+    public let dayPnl: String?          // nil: no quote, or no close before its session
     public let lane: String?
 }
 
@@ -162,8 +163,43 @@ public struct PortfolioBook: Codable, Sendable, Equatable, Identifiable {
     public let priced: Bool
     public let netDeposits: String
     public let totalPnl: String?
+    public let dayPnl: String?
+    public let dayPnlPartial: Bool?     // some position's day P&L is unknown, so the book's leaves it out
     public let positions: [PortfolioPosition]
     public let allocation: [Allocation]
+}
+
+/// The idea a position was bought on: its one-sentence reason, stop and target.
+public struct PositionThesis: Codable, Sendable, Equatable {
+    public let ideaId: Int
+    public let lane: String
+    public let module: String
+    public let status: String
+    public let entry: String?
+    public let stop: String?
+    public let target: String?
+    public let reason: String
+}
+
+/// One stock in one book, as the position screen shows it.
+public struct PositionDetail: Codable, Sendable, Equatable {
+    public let book: String
+    public let ticker: String
+    public let quantity: String
+    public let averageCost: String?
+    public let costBasis: String?
+    public let price: String?
+    public let priceSource: String?
+    public let priceAsOf: String?
+    public let value: String?
+    public let dayPnl: String?
+    public let unrealizedPnl: String?
+    public let realizedPnl: String
+    public let totalPnl: String?
+    public let thesis: PositionThesis?
+    public let memo: Memo?
+    public let news: [NewsRow]
+    public let nextEarnings: EarningsRow?
 }
 
 public struct Portfolio: Codable, Sendable, Equatable {
@@ -266,6 +302,19 @@ public enum Stamp {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    }
+
+    /// A day as "Oct 28, 2026". A date with no time (an earnings day, a series point) is a calendar day, not a
+    /// moment, so it is read and shown in UTC: shown in the device's zone it would move a day west of Greenwich.
+    public static func day(_ iso: String, in zone: TimeZone = .current) -> String {
+        var style = Date.FormatStyle(date: .abbreviated, time: .omitted)
+        if let d = date(iso) {
+            style.timeZone = zone                                   // a moment: the day it is where it is read
+            return d.formatted(style)
+        }
+        guard let d = try? Date(iso, strategy: .iso8601.year().month().day()) else { return iso }
+        style.timeZone = TimeZone(identifier: "UTC") ?? zone        // a calendar day: the day as written
+        return d.formatted(style)
     }
 
     /// "Oct 30, 2026 at 2:30 PM" style, or the raw string when it cannot be read.

@@ -245,14 +245,21 @@ class GDELT(Source):
     needs_key = False
 
     def tone(self, query: str, days: int = 7) -> list[MacroPoint]:
+        """Average news tone per day. GDELT answers hourly points dated like 20261023T230000Z (checked against the
+        live service 2026-10-30); the hours of a day are averaged into one value."""
         j = self.get("", params={"query": query, "mode": "timelinetone", "format": "json", "timespan": f"{days}d"})
         series = (j.get("timeline") or [{}])[0].get("data") or []
-        out = []
+        by_day: dict[dt.date, list[Decimal]] = {}
         for p in series:
-            d = _date(p.get("date"))
-            if d:
-                out.append(MacroPoint(f"gdelt:{query}", d, dec(p.get("value"))))
-        return out
+            try:
+                day = dt.datetime.strptime(str(p.get("date")), "%Y%m%dT%H%M%SZ").date()
+            except ValueError:
+                continue
+            v = dec(p.get("value"))
+            if v is not None:
+                by_day.setdefault(day, []).append(v)
+        return [MacroPoint(f"gdelt:{query}", d, (sum(vs, Decimal(0)) / len(vs)).quantize(Decimal("0.0001")))
+                for d, vs in sorted(by_day.items())]
 
 
 ALL: dict[str, type[Source]] = {s.name: s for s in (Alpaca, Massive, FMP, Finnhub, Edgar, FRED, Tradier, GDELT)}

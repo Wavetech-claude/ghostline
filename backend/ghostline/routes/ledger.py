@@ -12,6 +12,8 @@ from ghostline import ledger, prices
 from ghostline.auth import OwnerSub
 from ghostline.ghost import Ghost
 from ghostline.ledger import Trade
+from ghostline.market import store
+from ghostline.routes.claude import MEMO_SQL
 
 router = APIRouter()
 BOOKS = ("real", "practice", "ai", "ghost", "options")
@@ -245,17 +247,40 @@ def history(request: Request, sub: str = OwnerSub, book: str | None = None, tick
     closed_out = []
     for c in closed:
         t = by_id[c.trade_id]
+        # a sale by hand still belongs to the idea and memo the shares were bought on
+        opened = [by_id[o] for o in c.opened_trade_ids if o in by_id]
+        idea_id = t.get("idea_id") or next((o["idea_id"] for o in opened if o.get("idea_id")), None)
+        memo_id = t.get("memo_id") or next((o["memo_id"] for o in opened if o.get("memo_id")), None)
         closed_out.append({"trade_id": c.trade_id, "book": books.get(c.book_id), "ticker": c.ticker,
                            "asset": t["asset"], "lane": t.get("lane"), "quantity": _qty(c.quantity),
                            "at": c.at.isoformat(), "proceeds": str(c.proceeds), "cost": str(c.cost),
                            "pnl": str(c.pnl), "pnl_pct": _dec(c.pnl_pct),
-                           "opened_trade_ids": list(c.opened_trade_ids), "idea_id": t.get("idea_id"),
-                           "memo_id": t.get("memo_id"), "attachments": t.get("attachments")})
+                           "opened_trade_ids": list(c.opened_trade_ids), "idea_id": idea_id,
+                           "memo_id": memo_id, "attachments": t.get("attachments")})
     totals = {k: _dec(v) if isinstance(v, Decimal) else v for k, v in ledger.totals(closed).items()}
     return {"closed": closed_out, "open": open_out, "totals": totals}
 
 
 # ── portfolio ──────────────────────────────────────────────────────────────────────────────────────────────
+def _day_pnls(db: Any, trades: list[Trade], positions: list[ledger.Position],
+              px: dict[str, prices.Price]) -> dict[tuple[int, str], Decimal | None]:
+    """Day P&L per (book, stock ticker) for every position held now or closed in its ticker's latest session. A ticker
+    without a stored quote has no session, so its day P&L is unknown (None)."""
+    sessions = {t: prices.session_day(q.as_of) for t, q in px.items()}
+    closes = prices.previous_closes(db, sessions)
+    held = {(p.book_id, p.ticker): p.quantity for p in positions}
+    in_session: dict[tuple[int, str], list[Trade]] = {}
+    for t in trades:
+        if t.asset == "stock" and t.ticker in sessions and prices.session_day(t.at) == sessions[t.ticker]:
+            in_session.setdefault((t.book_id, t.ticker), []).append(t)
+    out: dict[tuple[int, str], Decimal | None] = {}
+    for key in set(held) | set(in_session):
+        q = px.get(key[1])
+        out[key] = ledger.day_pnl(held.get(key, Decimal(0)), q.price if q else None, closes.get(key[1]),
+                                  in_session.get(key, [])) if q else None
+    return out
+
+
 @router.get("/portfolio")
 def portfolio(request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
@@ -263,7 +288,10 @@ def portfolio(request: Request, sub: str = OwnerSub) -> dict:
     all_rows = db.fetch_all("SELECT * FROM trades ORDER BY at, id")
     trades = [Trade.from_row(r) for r in all_rows]
     _, positions = ledger.settle(trades)
-    px = prices.latest(db, sorted({p.ticker for p in positions}))
+    recent = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)      # a ticker sold out in its latest session still counts
+    px = prices.latest(db, sorted({p.ticker for p in positions}
+                                  | {t.ticker for t in trades if t.asset == "stock" and t.at >= recent}))
+    day = _day_pnls(db, trades, positions, px)
     lanes = {(r["book_id"], r["ticker"]): r.get("lane") for r in all_rows if r.get("lane")}
     out_books, grand = [], Decimal(0)
     for b in books:
@@ -280,6 +308,7 @@ def portfolio(request: Request, sub: str = OwnerSub) -> dict:
                             "cost_basis": str(p.cost_basis), "price": _dec(q.price if q else None),
                             "price_source": q.source if q else None, "price_as_of": q.as_of.isoformat() if q else None,
                             "value": _dec(value), "unrealized_pnl": _dec(p.unrealized(q.price if q else None)),
+                            "day_pnl": _dec(day.get((p.book_id, p.ticker))),
                             "lane": lanes.get((p.book_id, p.ticker))})
         total = ledger.money(cash + invested)
         grand += total
@@ -289,13 +318,59 @@ def portfolio(request: Request, sub: str = OwnerSub) -> dict:
             by_lane[lane] = by_lane.get(lane, Decimal(0)) + Decimal(p["value"] or p["cost_basis"])
         deposits = sum((f for f in flows if f > 0), Decimal(0))
         net = sum(flows, Decimal(0))
+        book_day = [v for (bid, _), v in day.items() if bid == b["id"]]
+        known_day = [v for v in book_day if v is not None]
         out_books.append({"book": b["kind"], "name": b["name"], "cash": str(cash),
                           "invested": str(ledger.money(invested)), "total": str(total), "priced": priced,
                           "net_deposits": str(ledger.money(net)),
                           "total_pnl": str(ledger.money(total - net)) if deposits else None,
+                          "day_pnl": str(ledger.money(sum(known_day, Decimal(0)))) if known_day else None,
+                          "day_pnl_partial": len(known_day) < len(book_day),
                           "positions": pos_out,
                           "allocation": [{"name": k, "share": str((v / total).quantize(Decimal("0.0001")))
                                           if total else None} for k, v in sorted(by_lane.items())]})
     unpriced = "some positions have no stored price yet; shown at cost"
     return {"books": out_books, "total": str(ledger.money(grand)),
             "note": None if all(b["priced"] for b in out_books) else unpriced}
+
+
+# ── one position ───────────────────────────────────────────────────────────────────────────────────────────
+@router.get("/positions/{book}/{ticker}")
+def position(book: str, ticker: str, request: Request, sub: str = OwnerSub) -> dict:
+    """One stock in one book: shares, average cost, price with source and time, value, day and total P&L, the thesis
+    it was bought on (the idea's reason, stop and target), the newest memo's call, recent news and the next report."""
+    if book not in BOOKS:
+        raise HTTPException(status_code=404, detail=f"no book {book}")
+    db = request.app.state.db
+    t = ticker.strip().upper()
+    book_id = _book_id(db, book)
+    rows = db.fetch_all("SELECT * FROM trades WHERE book_id = %s AND ticker = %s AND asset = 'stock' ORDER BY at, id",
+                        (book_id, t))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"no {t} trades in the {book} book")
+    trades = [Trade.from_row(r) for r in rows]
+    closed, positions = ledger.settle(trades)
+    pos = positions[0] if positions else None
+    q = prices.latest(db, [t]).get(t)
+    price = q.price if q else None
+    day = _day_pnls(db, trades, positions, {t: q} if q else {}).get((book_id, t))
+    realized = ledger.money(sum((c.pnl for c in closed), Decimal(0)))
+    unrealized = pos.unrealized(price) if pos else ledger.money(Decimal(0))
+    thesis = db.fetch_one(
+        "SELECT i.id AS idea_id, i.lane, i.module, i.entry, i.stop, i.target, i.status, s.reason FROM trades t "
+        "JOIN ideas i ON i.id = t.idea_id JOIN signals s ON s.id = i.signal_id "
+        "WHERE t.book_id = %s AND t.ticker = %s AND t.side = 'buy' ORDER BY t.at DESC, t.id DESC LIMIT 1",
+        (book_id, t))
+    memo = db.fetch_one(MEMO_SQL + " WHERE ticker = %s ORDER BY id DESC LIMIT 1", (t,))
+    report = db.fetch_one("SELECT * FROM earnings WHERE ticker = %s AND at >= %s "
+                          "ORDER BY at LIMIT 1", (t, dt.datetime.now(prices.NEW_YORK).date()))
+    return {"book": book, "ticker": t, "quantity": _qty(pos.quantity) if pos else "0",
+            "average_cost": str(pos.average_cost) if pos else None,
+            "cost_basis": str(pos.cost_basis) if pos else None, "price": _dec(price),
+            "price_source": q.source if q else None, "price_as_of": q.as_of.isoformat() if q else None,
+            "value": _dec(pos.value(price)) if pos else "0.00", "day_pnl": _dec(day),
+            "unrealized_pnl": _dec(unrealized), "realized_pnl": str(realized),
+            "total_pnl": _dec(None if unrealized is None else ledger.money(realized + unrealized)),
+            "thesis": store.jsonable(thesis) if thesis else None, "memo": store.jsonable(memo) if memo else None,
+            "news": store.as_json(store.news_for(db, t, limit=5)),
+            "next_earnings": store.jsonable(report) if report else None}

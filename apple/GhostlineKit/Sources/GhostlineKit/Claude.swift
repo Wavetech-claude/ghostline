@@ -105,6 +105,10 @@ public extension APIClient {
         try await get("/deep-dive/\(ticker)", authenticated: true)
     }
 
+    func memo(id: Int) async throws -> Memo {
+        try await get("/memos/\(id)", authenticated: true)
+    }
+
     func job(id: Int) async throws -> ClaudeJob {
         try await get("/jobs/\(id)", authenticated: true)
     }

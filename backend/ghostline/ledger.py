@@ -143,6 +143,23 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
     return closed, sorted(positions, key=lambda p: (p.book_id, p.ticker))
 
 
+def day_pnl(quantity: Decimal, price: Decimal | None, previous_close: Decimal | None,
+            session: list[Trade]) -> Decimal | None:
+    """A stock position's change in value over one session: the shares held at the previous close count from that
+    close, a share bought in the session from its fill, a share sold in the session up to its fill (fees included).
+    value now − value at the previous close − money put in during the session. None when a needed price is unknown."""
+    bought = sum((t.quantity for t in session if t.side == "buy"), Decimal(0))
+    sold = sum((t.quantity for t in session if t.side == "sell"), Decimal(0))
+    held_at_close = quantity - bought + sold
+    if (quantity > 0 and price is None) or (held_at_close > 0 and previous_close is None):
+        return None
+    put_in = sum((t.quantity * t.fill + t.fees for t in session if t.side == "buy"), Decimal(0)) - sum(
+        (t.quantity * t.fill - t.fees for t in session if t.side == "sell"), Decimal(0))
+    now = quantity * price if quantity > 0 and price is not None else Decimal(0)
+    then = held_at_close * previous_close if held_at_close > 0 and previous_close is not None else Decimal(0)
+    return money(now - then - put_in)
+
+
 def totals(closed: list[Closed]) -> dict[str, Any]:
     """Count, win rate, average win, average loss, net P&L of a set of closed trades."""
     wins = [c.pnl for c in closed if c.pnl > 0]

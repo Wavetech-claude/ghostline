@@ -44,8 +44,15 @@ public struct SeriesPoint: Codable, Sendable, Equatable, Identifiable {
     public let value: String
     public let netFlow: String
     public let twrPct: String
+    public let spyPct: String?          // SPY's return since the book's first day; nil before a stored SPY close
 
     public var day: Date? { Stamp.date(date + "T00:00:00Z") }
+}
+
+public struct BookSeries: Codable, Sendable, Equatable {
+    public let book: String
+    public let points: [SeriesPoint]
+    public let twrPct: String?
 }
 
 public struct TraderSeries: Codable, Sendable, Equatable {

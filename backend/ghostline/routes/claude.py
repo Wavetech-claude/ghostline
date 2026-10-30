@@ -16,6 +16,10 @@ from ghostline.auth import OwnerSub
 from ghostline.claude import jobs
 
 router = APIRouter()
+# one memo, as every screen reads it (the deep dive, a position, a trade in the history)
+MEMO_SQL = ("SELECT id, idea_id, ticker, call, size_money, bull, base, bear, catalysts, invalidation, "
+            "what_would_change, confidence_low, confidence_high, grounded, struck, trace_id, job_id, created_at "
+            "FROM memos")
 
 
 def _row(r: dict) -> dict:
@@ -50,18 +54,21 @@ def deep_dive(body: DeepDiveIn, request: Request, sub: str = OwnerSub) -> dict:
 def memos(ticker: str, request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     t = ticker.strip().upper()
-    rows = db.fetch_all(
-        "SELECT id, idea_id, ticker, call, size_money, bull, base, bear, catalysts, invalidation, what_would_change, "
-        "confidence_low, confidence_high, grounded, struck, trace_id, job_id, created_at FROM memos WHERE ticker = %s "
-        "ORDER BY id DESC LIMIT 5",
-        (t,),
-    )
+    rows = db.fetch_all(MEMO_SQL + " WHERE ticker = %s ORDER BY id DESC LIMIT 5", (t,))
     running = db.fetch_one(
         "SELECT id, status, created_at FROM claude_jobs WHERE kind = 'deep_dive' AND payload->>'ticker' = %s "
         "AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1",
         (t,),
     )
     return {"ticker": t, "memos": [_row(r) for r in rows], "running": _row(running) if running else None}
+
+
+@router.get("/memos/{memo_id}")
+def memo(memo_id: int, request: Request, sub: str = OwnerSub) -> dict:
+    row = request.app.state.db.fetch_one(MEMO_SQL + " WHERE id = %s", (memo_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="no such memo")
+    return _row(row)
 
 
 @router.get("/jobs/{job_id}")

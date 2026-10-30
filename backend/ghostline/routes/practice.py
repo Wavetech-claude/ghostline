@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ghostline import ledger, occ
 from ghostline.auth import OwnerSub
-from ghostline.market import NotConfigured, RateLimited, dec, store, utcnow
+from ghostline.market import NotConfigured, RateLimited, store, utcnow
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import Tradier
 from ghostline.practice import Practice
@@ -191,33 +191,8 @@ def chain(request: Request, ticker: str, expiry: dt.date,
     t = ticker.strip().upper()
     raw, why = _counted(db, "chain", _tradier(request).chain, t, expiry)
     facts = Practice(db).facts(Practice(db).book_id(book))
-    rows: list[dict] = []
     as_of = utcnow()
-    for o in raw or []:
-        symbol = str(o.get("symbol") or "")
-        try:
-            parsed = occ.parse(symbol)
-        except ValueError:
-            continue
-        greeks = o.get("greeks") or {}
-        row = {"option_symbol": parsed.symbol, "underlying": parsed.underlying, "expiry": parsed.expiry,
-               "strike": parsed.strike, "kind": parsed.kind, "bid": dec(o.get("bid")), "ask": dec(o.get("ask")),
-               "last": dec(o.get("last")),
-               "volume": dec(o.get("volume")), "open_interest": dec(o.get("open_interest")),
-               "iv": dec(greeks.get("mid_iv") or greeks.get("smv_vol")), "delta": dec(greeks.get("delta"))}
-        rows.append(row)
-    if rows:
-        with db.connection() as conn:
-            for r in rows:
-                conn.execute("INSERT INTO option_chains (option_symbol, underlying, expiry, strike, kind, bid, ask, "
-                             "last, volume, open_interest, iv, delta, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, "
-                             "%s, %s, %s, %s, %s, %s, 'tradier', %s) ON CONFLICT DO NOTHING",
-                             (r["option_symbol"], r["underlying"], r["expiry"], r["strike"], r["kind"], r["bid"],
-                              r["ask"], r["last"], r["volume"], r["open_interest"], r["iv"], r["delta"], as_of))
-            conn.commit()
-        # the chain's bid and ask double as the option's quote, so a practice order can fill against it
-        quotes = [store.Quote(r["option_symbol"], r["bid"], r["ask"], r["last"], as_of, True) for r in rows]
-        store.save_quotes(db, quotes, "tradier", as_of)
+    rows = store.save_chain(db, raw or [], as_of)
     out = []
     for r in sorted(rows, key=lambda x: (x["kind"], x["strike"])):
         collateral = r["strike"] * 100 if r["kind"] == "put" else None

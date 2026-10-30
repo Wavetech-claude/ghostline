@@ -2,6 +2,24 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.9.0] — unreleased
+
+- Day P&L: the portfolio shows each position's and each book's change since the previous session's close. A share
+  bought in the session counts from its fill, a share sold in it up to its fill. A position with no close before its
+  session is left out of the book's day P&L, and the screen says so.
+- A position screen: tap a holding in the portfolio or the history to see shares, average cost, the price with its
+  source and time, day, open, closed and total P&L, the thesis it was bought on (the idea's reason, stop and target),
+  Ghostline's latest call, recent news and the next earnings date.
+- Value over time: each book's time-weighted return beside SPY's return over the same days, on the portfolio screen.
+- A closed trade in the history opens the idea and the memo behind it. A sale by hand keeps the idea its shares were
+  bought on.
+- Earnings show how the stock moved around each past report: the close before it to the close after it.
+- The worker stores option chains every weekday at 06:12 PT, before the scan, for every stock held, watched or in an
+  open long-term idea: the expiry 30 to 45 days out nearest 38 days. The sell-puts module reads only stored chains.
+- The morning macro pull adds GDELT's daily world news tone on three topics, one request every 6 seconds (GDELT asks
+  for at most one every 5). The brief reads it with the other macro numbers.
+- Fixed: a date with no time, such as an earnings day, showed one day early west of Greenwich.
+
 ## [0.8.0] — unreleased
 
 - The journal and the learning loop. Every idea the scan makes is paper-traded at the next open and settled at the
