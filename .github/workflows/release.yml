@@ -1,0 +1,87 @@
+name: Release
+
+# Runs on the `v*` tag the release tap creates (only the GitHub App may create one: tag ruleset "release tags").
+# Archives both destinations and uploads them to TestFlight with the App Store Connect key held by the `testflight`
+# environment, which only `v*` tags may use. MARKETING_VERSION = VERSION; CURRENT_PROJECT_VERSION = this run's number.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: testflight
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: testflight
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The tag is the repository's version
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} is not VERSION $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Xcode
+        run: |
+          xcode-select -p
+          xcodebuild -version
+
+      - name: XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the project at this version
+        working-directory: apple
+        run: |
+          sed -i '' "s/MARKETING_VERSION: \"[0-9.]*\"/MARKETING_VERSION: \"$VERSION\"/" project.yml
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUMBER\"/" project.yml
+          grep -E 'MARKETING_VERSION|CURRENT_PROJECT_VERSION' project.yml
+          xcodegen generate --spec project.yml
+
+      - name: The App Store Connect key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+
+      - name: Archive and upload, iOS
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        working-directory: apple
+        run: |
+          xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Ghostline-ios.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM=WLL7D7F26Q CODE_SIGN_STYLE=Automatic archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Ghostline-ios.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist -exportPath "$RUNNER_TEMP/export-ios" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Archive and upload, macOS
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        working-directory: apple
+        run: |
+          xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Release \
+            -destination 'generic/platform=macOS' -archivePath "$RUNNER_TEMP/Ghostline-mac.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM=WLL7D7F26Q CODE_SIGN_STYLE=Automatic archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Ghostline-mac.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist -exportPath "$RUNNER_TEMP/export-mac" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Forget the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
