@@ -39,20 +39,12 @@ struct TodayView: View {
     @Environment(LedgerModel.self) private var ledger
     @State private var investing = false
     @State private var todos: [TodoItem] = []
+    @State private var watching = 0
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if !ledger.rulesComplete {
-                    ContentCard {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Before anything else", systemImage: "shield.lefthalf.filled")
-                                .font(.headline)
-                            Text("Set your risk rules in Settings. Until they are saved, no idea passes.")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                GetStartedCard(watching: watching)
                 BriefCard()
                 if !todos.isEmpty {
                     NavigationLink { TodoListView() } label: {
@@ -88,10 +80,24 @@ struct TodayView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Today")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink { GuideView() } label: { Label("How to Use Ghostline", systemImage: "questionmark.circle") }
+            }
+        }
         .sheet(isPresented: $investing) { InvestSheet() }
         .task { todos = (try? await session.client.todos()) ?? [] }
         .task { await ledger.loadRules() }
-        .refreshable { await session.refreshBackend(); await ledger.loadRules() }
+        .task {
+            await ledger.loadPortfolio()
+            watching = (try? await session.client.watchlist())?.count ?? 0
+        }
+        .refreshable {
+            await session.refreshBackend()
+            await ledger.loadRules()
+            await ledger.loadPortfolio()
+            watching = (try? await session.client.watchlist())?.count ?? watching
+        }
     }
 }
 

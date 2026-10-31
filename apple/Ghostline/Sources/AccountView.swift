@@ -50,6 +50,9 @@ struct AccountView: View {
                     Label("Journal", systemImage: "book.closed")
                 }
             }
+            Section {
+                NavigationLink { GuideView() } label: { Label("How to Use Ghostline", systemImage: "questionmark.circle") }
+            }
             if case .signedIn(let account) = session.state {
                 Section("Signed in") {
                     LabeledContent("Apple ID", value: account.emailMasked.isEmpty ? "hidden" : account.emailMasked)
