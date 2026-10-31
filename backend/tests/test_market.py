@@ -189,7 +189,7 @@ def test_the_worker_registers_the_plans_schedule(fresh_db):
     db = Database(settings())
     sch = BackgroundScheduler(timezone="America/Los_Angeles")
     ids = schedule.register(sch, db, settings=settings())     # an unnamed environment reads as staging
-    assert ids == ["pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest"]
+    assert ids == ["pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings", "pull_fundamentals", "pull_chains", "scan_ideas", "pull_quotes", "fill_orders", "close_session", "claude_poll", "morning_brief", "ghost_sync", "invest_place", "ai_entries", "options_entries", "ai_exits", "alerts_check", "learning_run", "weekly_eval", "weekly_digest", "reconcile_reminder"]
     quotes = sch.get_job("pull_quotes")
     assert "day_of_week='mon-fri'" in str(quotes.trigger) and "hour='6-13'" in str(quotes.trigger)
     assert str(schedule.PT) == "America/Los_Angeles"

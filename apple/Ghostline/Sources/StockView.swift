@@ -422,7 +422,7 @@ struct EarningsLines: View {
     let earnings: [EarningsRow]
 
     var body: some View {
-        let today = Date().formatted(.iso8601.year().month().day())
+        let today = Stamp.localDay(Date())
         let next = earnings.filter { $0.at >= today }.min { $0.at < $1.at }
         let last = earnings.filter { $0.at < today }.max { $0.at < $1.at }
         if let next {

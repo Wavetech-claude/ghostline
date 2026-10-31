@@ -102,7 +102,13 @@ struct TradeFormView: View {
                 if case .success(let url) = result { load(url) }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { ledger.prefillTodo = nil; dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        ledger.prefillTodo = nil
+                        ledger.prefillIdea = nil
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }.disabled(!valid || ledger.busy)
                 }
@@ -113,6 +119,23 @@ struct TradeFormView: View {
 
     /// "I Placed It" on a to-do item: the real trade is filled in from the plan; the owner corrects the fill details.
     private func prefill() {
+        if let i = ledger.prefillIdea {
+            book = "real"
+            ticker = i.ticker
+            lane = i.lane
+            quantity = i.quantity.map { Show.plainNumber($0) } ?? ""
+            fill = i.entry.map { Show.plainNumber($0) } ?? ""
+            if let option = i.optionSymbol {
+                asset = "option"
+                side = "sell_to_open"
+                optionSymbol = option
+            } else {
+                asset = "stock"
+                side = "buy"
+            }
+            readNote = "Filled from the idea. Correct the quantity, price and time to what your broker shows."
+            return
+        }
         guard let t = ledger.prefillTodo else { return }
         book = "real"
         asset = t.asset
@@ -176,12 +199,14 @@ struct TradeFormView: View {
         let input = TradeInput(book: book, ticker: ticker.trimmingCharacters(in: .whitespaces).uppercased(), asset: asset,
                                side: side, quantity: quantity, fill: fill, at: Stamp.string(at), fees: fees,
                                broker: broker.isEmpty ? nil : broker, note: note.isEmpty ? nil : note,
-                               optionSymbol: asset == "option" ? optionSymbol : nil, lane: lane.isEmpty ? nil : lane)
+                               optionSymbol: asset == "option" ? optionSymbol : nil, lane: lane.isEmpty ? nil : lane,
+                               ideaId: ledger.prefillTodo?.ideaId ?? ledger.prefillIdea?.id)
         if let row = await ledger.addTrade(input, attachment: attachment) {
             if let todo = ledger.prefillTodo {
                 await ledger.closeTodo(todo, tradeId: row.id)
             }
             ledger.prefillTodo = nil
+            ledger.prefillIdea = nil
             dismiss()
         } else {
             problem = ledger.error

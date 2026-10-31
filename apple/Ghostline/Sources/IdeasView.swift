@@ -129,8 +129,13 @@ struct IdeaCard: View {
 struct IdeaDetailView: View {
     @Environment(SessionModel.self) private var session
     @Environment(PracticeModel.self) private var practice
+    @Environment(LedgerModel.self) private var ledger
     let idea: IdeaRow
     @State private var detail: IdeaDetail?
+    @State private var declined = false
+    @State private var askingWhy = false
+    @State private var why = ""
+    @State private var problem: String?
 
     var body: some View {
         List {
@@ -157,9 +162,51 @@ struct IdeaDetailView: View {
                 NavigationLink { TickerView(ticker: idea.ticker) } label: { Label("News and Earnings", systemImage: "newspaper") }
                 Button { practice.openTicket(ticker: idea.ticker) } label: { Label("Try It in Practice", systemImage: "cart") }
             }
+            Section {
+                Button { ledger.logBought(idea) } label: { Label("I Bought It", systemImage: "checkmark.circle") }
+                if declined {
+                    HStack {
+                        Label("You said no", systemImage: "hand.raised")
+                        Spacer()
+                        Button("Undo") { Task { await undo() } }
+                    }
+                } else {
+                    Button { askingWhy = true } label: { Label("Not for Me", systemImage: "hand.raised") }
+                }
+                if let problem { Text(problem).font(.footnote).foregroundStyle(.loss) }
+            } header: {
+                Text("Your Decision")
+            } footer: {
+                Text("Reconciliation counts what you did with each idea: bought it, said no, or let it lapse.")
+            }
+        }
+        .alert("Not for Me", isPresented: $askingWhy) {
+            TextField("Why? (optional)", text: $why)
+            Button("Save") { Task { await decline() } }
+            Button("Cancel", role: .cancel) {}
         }
         .navigationTitle(idea.ticker)
         .task { detail = try? await session.client.idea(id: idea.id) }
+    }
+
+    private func decline() async {
+        do {
+            try await session.client.decline(kind: "idea", refId: idea.id, reason: why.isEmpty ? nil : why)
+            declined = true
+            problem = nil
+        } catch {
+            problem = (error as? GhostlineError)?.userMessage ?? error.localizedDescription
+        }
+    }
+
+    private func undo() async {
+        do {
+            try await session.client.undoDecline(kind: "idea", refId: idea.id)
+            declined = false
+            problem = nil
+        } catch {
+            problem = (error as? GhostlineError)?.userMessage ?? error.localizedDescription
+        }
     }
 }
 
