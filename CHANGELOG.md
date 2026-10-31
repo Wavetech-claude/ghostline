@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.13.0] — unreleased
+
+- A new stock page, in the look the owner chose ("Ghost"). Top to bottom:
+  - the big price and its change, on a soft ghost-blue glow;
+  - one clean ghost-blue line with no axes, and a dotted line at the period's first close. Drag it and the price
+    follows: that day's close, the change since the period began, and the date;
+  - time buttons (1W to 5Y) and a button for the advanced chart (candles and indicators, unchanged);
+  - cards for your position in each book, Ghostline's call, the day's numbers, the next and last earnings, news, and
+    the options chain;
+  - "Ask Ghostline" and "Practice Buy" in a glass bar at the bottom, and Watch and Price Alerts at the top.
+- It replaces the old list of buttons. Volume is labelled "IEX volume": Alpaca's free feed counts one exchange
+  only, far below a stock's whole volume.
+
 ## [0.12.0] — unreleased
 
 - Ghost blue. The app's colour is a deep indigo blue, #4F46E5 in light mode and #8586FF in dark mode, chosen with
