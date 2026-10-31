@@ -269,6 +269,7 @@ struct StockSections: View {
 struct StockLine: View {
     let points: [StockPoint]
     @Binding var picked: Date?
+    var label = "Price line"
 
     private var pickedPoint: StockPoint? {
         guard let picked else { return nil }
@@ -311,7 +312,7 @@ struct StockLine: View {
         .chartXSelection(value: $picked)
         .sensoryFeedback(.selection, trigger: pickedPoint?.day)
         .shadow(color: Color.ghost.opacity(0.45), radius: 8)
-        .accessibilityLabel("Price line, \(points.count) daily closes. Drag to read a day.")
+        .accessibilityLabel("\(label), \(points.count) days. Drag to read a day.")
     }
 }
 
