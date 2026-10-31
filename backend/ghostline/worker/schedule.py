@@ -13,7 +13,7 @@ from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ghostline import alerts, reconcile, storage
+from ghostline import alerts, corporate, reconcile, storage
 from ghostline.ai_trader import AITrader
 from ghostline.claude import push
 from ghostline.claude.jobs import Jobs as ClaudeJobs
@@ -30,8 +30,8 @@ from ghostline.practice import Practice
 
 PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
-PULLS = ("pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_news_earnings",
-         "pull_fundamentals", "pull_chains", "pull_quotes")
+PULLS = ("pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_corporate_actions",
+         "pull_news_earnings", "pull_fundamentals", "pull_chains", "pull_quotes")
 
 
 def register(
@@ -84,6 +84,9 @@ def register(
             return {"skipped": "after the close: practice orders fill only while the market is open"}
         return p.fill_open_orders()
 
+    def apply_corporate_actions() -> dict:
+        return corporate.apply(db)
+
     def reconcile_reminder() -> dict:
         return reconcile.remind(db, settings)
 
@@ -99,6 +102,9 @@ def register(
         ("pull_tone", j.pull_tone, CronTrigger(hour="0-4", minute="0,30", timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
+        # splits and dividends: pulled (production), then applied to every environment's books before the scan
+        ("pull_corporate_actions", j.pull_corporate_actions, CronTrigger(hour=5, minute=20, timezone=PT)),
+        ("apply_corporate_actions", apply_corporate_actions, CronTrigger(hour=5, minute=25, timezone=PT)),
         ("pull_news_earnings", j.pull_news_earnings, CronTrigger(hour=6, minute=0, timezone=PT)),
         ("pull_fundamentals", j.pull_fundamentals, CronTrigger(hour=6, minute=10, timezone=PT)),
         ("pull_chains", j.pull_chains, CronTrigger(day_of_week="mon-fri", hour=6, minute=12, timezone=PT)),

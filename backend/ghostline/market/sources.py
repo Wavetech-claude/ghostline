@@ -31,6 +31,7 @@ import httpx
 
 from ghostline.market import (
     Bar,
+    CorporateAction,
     Earning,
     Filing,
     MacroPoint,
@@ -44,6 +45,10 @@ from ghostline.market import (
 
 UA = "Ghostline/0.2 (personal research tool; contact: owner)"
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
+ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
+ACTION_KINDS = (("forward_split", "forward_splits"), ("reverse_split", "reverse_splits"),
+                ("cash_dividend", "cash_dividends"))
+MAX_PAGES = 20
 NEW_YORK = ZoneInfo("America/New_York")
 
 # httpx logs every request's whole address at INFO, and FRED's key travels in its query: the worker logs at INFO and
@@ -148,6 +153,30 @@ class Alpaca(Source):
             if day and settles:
                 out.append(MarketSession(day, dt.datetime.combine(day, opens, tzinfo=NEW_YORK),
                                          dt.datetime.combine(day, closes, tzinfo=NEW_YORK), settles))
+        return out
+
+    def corporate_actions(self, tickers: list[str], start: dt.date, end: dt.date) -> list[CorporateAction]:
+        """Splits and cash dividends for the tickers with an ex-date from start to end, every page (at most 20).
+        Read live 2026-10-30: NVDA's 10-for-1 split of 2024-06-10 came back as new_rate 10, old_rate 1."""
+        out: list[CorporateAction] = []
+        token = None
+        for _ in range(MAX_PAGES):
+            params = {"symbols": ",".join(tickers), "types": ",".join(k for k, _ in ACTION_KINDS),
+                      "start": start.isoformat(), "end": end.isoformat(), "limit": 1000}
+            if token:
+                params["page_token"] = token
+            j = self.fetch(ALPACA_V1 + "/corporate-actions", params=params, headers=self._headers())
+            groups = j.get("corporate_actions") or {}
+            for kind, key in ACTION_KINDS:
+                for a in groups.get(key) or []:
+                    ex = _date(a.get("ex_date"))
+                    if ex and a.get("id") and a.get("symbol"):
+                        out.append(CorporateAction(str(a["id"]), kind, str(a["symbol"]).upper(), ex,
+                                                   _date(a.get("record_date")), _date(a.get("payable_date")),
+                                                   dec(a.get("old_rate")), dec(a.get("new_rate")), dec(a.get("rate"))))
+            token = j.get("next_page_token")
+            if not token:
+                break
         return out
 
     def quotes(self, tickers: list[str]) -> list[Quote]:

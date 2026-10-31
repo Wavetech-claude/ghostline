@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from ghostline.db import Database
-from ghostline.market import Bar, Earning, Filing, MacroPoint, MarketSession, NewsItem, Quote
+from ghostline.market import Bar, CorporateAction, Earning, Filing, MacroPoint, MarketSession, NewsItem, Quote
 
 
 def save_bars(db: Database, ticker: str, timeframe: str, bars: list[Bar], source: str, as_of: dt.datetime) -> int:
@@ -92,6 +92,19 @@ def save_sessions(db: Database, sessions: list[MarketSession], start: dt.date, e
                          (s.day, s.opens_at, s.closes_at, s.settles_on, source, as_of))
         conn.commit()
     return len(sessions)
+
+
+def save_actions(db: Database, actions: list[CorporateAction], source: str, as_of: dt.datetime) -> int:
+    with db.connection() as conn:
+        for a in actions:
+            conn.execute("INSERT INTO corporate_actions (id, kind, ticker, ex_date, record_date, payable_date, "
+                         "old_rate, new_rate, rate, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                         "ON CONFLICT (id) DO UPDATE SET payable_date = EXCLUDED.payable_date, rate = EXCLUDED.rate, "
+                         "old_rate = EXCLUDED.old_rate, new_rate = EXCLUDED.new_rate, as_of = EXCLUDED.as_of",
+                         (a.id, a.kind, a.ticker, a.ex_date, a.record_date, a.payable_date, a.old_rate, a.new_rate,
+                          a.rate, source, as_of))
+        conn.commit()
+    return len(actions)
 
 
 def save_fundamentals(db: Database, ticker: str, payload: dict, source: str, as_of: dt.datetime) -> None:

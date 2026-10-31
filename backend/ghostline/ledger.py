@@ -109,12 +109,20 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
     oldest first. A close larger than the open lots closes what exists (the ledger says what it has, never what it
     guesses). A short leg
     (sold to open) carries its premium as a negative cost and its close pays, so its proceeds are negative; the
-    P&L is proceeds minus cost either way."""
+    P&L is proceeds minus cost either way. A split (quantity = the new count, fill = the old) turns every open lot's
+    shares into shares × new / old at the same cost; a dividend moves only cash (cash_balance)."""
     lots: dict[tuple[int, str, str, str], list[Lot]] = defaultdict(list)
     closed: list[Closed] = []
     for t in sorted(trades, key=lambda x: (x.at, x.id)):
         key = (t.book_id, t.ticker, t.asset, t.option_symbol or "")     # two puts on one stock never share lots
         m = t.multiplier
+        if t.side == "split":
+            for lot in lots[key]:
+                lot.quantity = lot.quantity * t.quantity / t.fill
+                lot.cost_per_unit = lot.cost_per_unit * t.fill / t.quantity
+            continue
+        if t.side == "dividend":
+            continue
         if t.opens:
             fee_per_unit = t.fees / t.quantity if t.quantity else Decimal(0)
             per_unit = -(t.fill * m - fee_per_unit) if t.short else t.fill * m + fee_per_unit
@@ -178,9 +186,12 @@ def totals(closed: list[Closed]) -> dict[str, Any]:
 
 
 def cash_balance(flows: list[Decimal], trades: list[Trade]) -> Decimal:
-    """Deposits and withdrawals, minus what was paid for opens, plus what closes brought in, minus fees."""
+    """Deposits and withdrawals, minus what was paid for opens, plus what closes and dividends brought in, minus
+    fees. A split moves no cash."""
     bal = sum(flows, Decimal(0))
     for t in trades:
+        if t.side == "split":
+            continue
         if t.side in ("buy", "buy_to_close"):
             bal -= t.quantity * t.fill * t.multiplier + t.fees
         else:

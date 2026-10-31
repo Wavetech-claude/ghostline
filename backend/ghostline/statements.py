@@ -1,6 +1,6 @@
 """Monthly statements per book: deposits, withdrawals, every trade, fees, realized P&L after fees, and cash at the
-month's end, as JSON, CSV, or a one-file PDF. Dividends are not tracked yet (corporate actions are not built): the
-statement says so instead of showing zero as if it were known."""
+month's end, as JSON, CSV, or a one-file PDF. Dividends are the cash dividends paid in the month (corporate
+actions, applied in the simulated books and confirmed by the owner in the real one)."""
 
 from __future__ import annotations
 
@@ -40,6 +40,8 @@ def build(db: Database, book: str, month: str) -> dict[str, Any]:
     withdrawals = -sum((Decimal(f["amount"]) for f in m_flows if Decimal(f["amount"]) < 0), Decimal(0))
     realized = sum((c.pnl for c in closed if start <= c.at <= end), Decimal(0))
     fees = sum((Decimal(r["fees"] or 0) for r in in_month), Decimal(0))
+    dividends = sum((Decimal(r["quantity"]) * Decimal(r["fill"]) for r in in_month if r["side"] == "dividend"),
+                    Decimal(0))
     return {
         "book": book,
         "name": b["name"],
@@ -48,8 +50,8 @@ def build(db: Database, book: str, month: str) -> dict[str, Any]:
         "withdrawals": str(ledger.money(withdrawals)),
         "fees": str(ledger.money(fees)),
         "realized_pnl": str(ledger.money(realized)),
-        "dividends": None,
-        "dividends_note": "dividends are not tracked yet",
+        "dividends": str(ledger.money(dividends)),
+        "dividends_note": "cash dividends paid in the month",
         "cash_at_end": str(ledger.cash_balance([Decimal(f["amount"]) for f in flows], trades)),
         "flows": [{"at": f["at"].isoformat(), "amount": str(f["amount"]), "note": f["note"]} for f in m_flows],
         "trades": [

@@ -34,6 +34,20 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
     )
     if not flows:
         return {"book": kind, "points": [], "twr_pct": None}
+    # Stored closes are split-adjusted (Alpaca, adjustment=split), so shares are counted in today's terms: each buy and
+    # sell times every split after it. A 2-for-1 split then neither halves the days before it nor doubles its own day.
+    splits: dict[str, list[tuple[dt.datetime, Decimal]]] = defaultdict(list)
+    for t in trades:
+        if t["side"] == "split":
+            splits[t["ticker"]].append((t["at"], Decimal(t["quantity"]) / Decimal(t["fill"])))
+
+    def later_splits(ticker: str, at: dt.datetime) -> Decimal:
+        factor = Decimal(1)
+        for when, f in splits.get(ticker, []):
+            if when > at:
+                factor *= f
+        return factor
+
     end = end or dt.date.today()
     start = flows[0]["at"].date()
     tickers = sorted({t["ticker"] for t in trades if t["asset"] == "stock"})
@@ -75,6 +89,8 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
         flow = pending_flow
         cash += flow
         for t in pending_trades:
+            if t["side"] == "split":            # already counted in every earlier trade (later_splits); no cash
+                continue
             m = Decimal(100) if t["asset"] == "option" else Decimal(1)
             amount = Decimal(t["quantity"]) * Decimal(t["fill"]) * m
             fees = Decimal(t["fees"] or 0)
@@ -82,9 +98,10 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
                 cash -= amount + fees
             else:
                 cash += amount - fees
-            if t["asset"] == "stock":
-                held[t["ticker"]] += Decimal(t["quantity"]) if t["side"] == "buy" else -Decimal(t["quantity"])
-                last_fill[t["ticker"]] = Decimal(t["fill"])
+            if t["asset"] == "stock" and t["side"] in ("buy", "sell"):     # a dividend is cash only
+                factor = later_splits(t["ticker"], t["at"])
+                held[t["ticker"]] += Decimal(t["quantity"]) * factor * (1 if t["side"] == "buy" else -1)
+                last_fill[t["ticker"]] = Decimal(t["fill"]) / factor             # a price in the same terms
         pending_flow, pending_trades = Decimal(0), []
         value = cash
         for tk, q in held.items():
