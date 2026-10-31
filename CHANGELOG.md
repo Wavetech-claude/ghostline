@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.14.0] — unreleased
+
+- Portfolio, Robinhood-style, in the Ghost look:
+  - a button per book (Real, Practice, AI, Options);
+  - the book's balance, big, over a ghost-blue line of its value. Drag the line and the balance, the gain and the
+    date follow;
+  - time buttons: 1W, 1M, 3M, 1Y, All. The gain over the period counts gains only: money paid in or out is taken
+    out, and the percent is the time-weighted return over the same days;
+  - cards: today (day P&L, cash, invested), holdings with today's change in a pill, the book against the S&P 500,
+    and every book's total.
+- An empty book says so and offers Add Money.
+
 ## [0.13.0] — unreleased
 
 - A new stock page, in the look the owner chose ("Ghost"). Top to bottom:
