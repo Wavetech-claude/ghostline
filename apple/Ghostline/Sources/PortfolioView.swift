@@ -6,6 +6,7 @@ import SwiftUI
 /// every price with its source and time. A position opens its own screen.
 struct PortfolioView: View {
     @Environment(LedgerModel.self) private var ledger
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         List {
@@ -14,6 +15,8 @@ struct PortfolioView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Total").font(.caption).foregroundStyle(.secondary)
                         Text(Show.money(p.total)).font(.system(.largeTitle, design: .rounded, weight: .semibold)).monospacedDigit()
+                            .contentTransition(.numericText(value: Double(p.total) ?? 0))
+                            .animation(.ghostline(reduceMotion), value: p.total)
                         if let note = p.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
                     }
                     .padding(.vertical, 4)
@@ -26,7 +29,7 @@ struct PortfolioView: View {
                         LabeledContent("Total", value: Show.money(book.total))
                         if let pnl = book.totalPnl {
                             LabeledContent("Total P&L") {
-                                Text(Show.signedMoney(pnl)).foregroundStyle(tint(pnl))
+                                Text(Show.signedMoney(pnl)).foregroundStyle(Show.tint(pnl))
                             }
                         }
                         if book.dayPnl != nil || book.dayPnlPartial == true {
@@ -68,14 +71,6 @@ struct PortfolioView: View {
         .task { await ledger.loadPortfolio() }
         .refreshable { await ledger.loadPortfolio() }
     }
-
-    private func tint(_ s: String?) -> Color {
-        switch Show.isGain(s) {
-        case .some(true): .green
-        case .some(false): .red
-        case .none: .primary
-        }
-    }
 }
 
 struct PositionRow: View {
@@ -93,10 +88,10 @@ struct PositionRow: View {
                 Text("\(Show.quantity(position.quantity)) at \(Show.money(position.averageCost)) avg")
                 Spacer()
                 if let day = position.dayPnl {
-                    Text("\(Show.signedMoney(day)) today").foregroundStyle(PnLRow.tint(day))
+                    Text("\(Show.signedMoney(day)) today").foregroundStyle(Show.tint(day))
                 }
                 if let pnl = position.unrealizedPnl {
-                    Text("\(Show.signedMoney(pnl)) open").foregroundStyle(PnLRow.tint(pnl))
+                    Text("\(Show.signedMoney(pnl)) open").foregroundStyle(Show.tint(pnl))
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
@@ -126,7 +121,7 @@ struct BookReturnSection: View {
             if let series, let first = series.points.first, let last = series.points.last {
                 BookReturnChart(name: name, points: series.points)
                     .frame(height: 180)
-                Text("\(name) \(Show.percent(last.twrPct)) since \(Stamp.day(first.date)) · S&P 500 \(Show.percent(last.spyPct))")
+                Text("\(name) \(Show.signedPercent(last.twrPct)) since \(Stamp.day(first.date)) · S&P 500 \(Show.signedPercent(last.spyPct))")
                     .font(.caption).foregroundStyle(.secondary)
             } else if series != nil {
                 Text("No money in this book yet.").foregroundStyle(.secondary)
@@ -153,6 +148,15 @@ struct BookReturnSection: View {
 struct BookReturnChart: View {
     let name: String
     let points: [SeriesPoint]
+    @State private var picked: Date?
+
+    /// The point nearest the finger while it drags across the chart.
+    private var pickedPoint: SeriesPoint? {
+        guard let picked else { return nil }
+        return points.filter { $0.day != nil }.min {
+            abs($0.day!.timeIntervalSince(picked)) < abs($1.day!.timeIntervalSince(picked))
+        }
+    }
 
     var body: some View {
         Chart {
@@ -170,11 +174,37 @@ struct BookReturnChart: View {
                 }
             }
             RuleMark(y: .value("Zero", 0)).foregroundStyle(.gray.opacity(0.3))
+            if let p = pickedPoint, let d = p.day {
+                RuleMark(x: .value("Picked", d))
+                    .foregroundStyle(Color.secondary.opacity(0.5))
+                    .annotation(position: .top, spacing: 4,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        Callout(lines: ["\(name) \(Show.signedPercent(p.twrPct))",
+                                        "S&P 500 \(Show.signedPercent(p.spyPct))"], day: d)
+                    }
+            }
         }
+        .chartXSelection(value: $picked)
+        .sensoryFeedback(.selection, trigger: pickedPoint?.id)
         // green and red mean gain and loss in this app, so the benchmark is a neutral, dashed line
-        .chartForegroundStyleScale(domain: [name, "S&P 500"], range: [Color.accentColor, Color.gray])
+        .chartForegroundStyleScale(domain: [name, "S&P 500"], range: [Color.ghost, Color.gray])
         .chartYAxisLabel("time-weighted return, %")
         .accessibilityLabel("Time-weighted return of \(name) against the S&P 500")
+    }
+}
+
+/// What a chart says at the point under the finger: the values, then the day.
+struct Callout: View {
+    let lines: [String]
+    let day: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(lines, id: \.self) { Text($0).font(.caption.weight(.semibold)).monospacedDigit() }
+            Text(day, format: .dateTime.month(.abbreviated).day().year()).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
     }
 }
 

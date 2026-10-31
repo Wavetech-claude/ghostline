@@ -60,8 +60,8 @@ struct InvestSheet: View {
                         }
                     }
                 }
-                if let done { Label(done, systemImage: "checkmark.circle").foregroundStyle(.green) }
-                if let problem { Text(problem).foregroundStyle(.red).font(.footnote) }
+                if let done { Label(done, systemImage: "checkmark.circle").foregroundStyle(.gain) }
+                if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             }
             .formStyle(.grouped)
             .navigationTitle("Invest This")

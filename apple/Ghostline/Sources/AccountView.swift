@@ -118,7 +118,7 @@ struct CashFlowSheet: View {
                 }
                 DatePicker("When", selection: $at)
                 TextField("Note", text: $note)
-                if let problem { Text(problem).foregroundStyle(.red).font(.footnote) }
+                if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             }
             .formStyle(.grouped)
             .navigationTitle(direction == "deposit" ? "Add Money" : "Take Money Out")

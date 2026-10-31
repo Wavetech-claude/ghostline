@@ -2,6 +2,24 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.12.0] — unreleased
+
+- Ghost blue. The app's colour is a deep indigo blue, #4F46E5 in light mode and #8586FF in dark mode, chosen with
+  the owner: blue stays apart from gain and loss. The old pale blue read at 1.3 to 1 on white, so buttons and links
+  nearly disappeared in light mode. The new colour reads at 6.3 to 1 there, and white button text on it at 3.1 to 1
+  in dark mode.
+- Gain and loss are a deep green and a deep red everywhere: P&L, candles, the MACD bars, a memo's call, statuses
+  and error messages. Apple's default green read at 2.2 to 1 on white. Every colour now reads at 4.8 to 1 or more on
+  every background, and gain and loss always carry a sign.
+- Charts: drag a finger across a price chart or the value-over-time chart to read that day (the price with its
+  open, high and low, or both returns), with a light tap at each new day. A line chart takes the period's result:
+  green when the price ended at or above where it began, red when below, with a soft fill.
+- Fixed: a price chart's axis was stretched by support levels from older history. A 6-month chart of MU ran from 0
+  to 1,500 with the prices squeezed into the top third. The axis now spans what the window draws, and only the
+  levels inside it show, never closer than 2 % to each other.
+- Motion where it means something: the portfolio total rolls to its new value, and a chart eases to new data.
+  Nothing moves with Reduce Motion on.
+
 ## [0.11.1] — unreleased
 
 - Only production pulls market data. Staging reads production's database, copied over staging's every day after the

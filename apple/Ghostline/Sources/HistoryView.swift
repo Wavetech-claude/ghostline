@@ -123,7 +123,7 @@ struct ClosedRow: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Text(Show.signedMoney(trade.pnl)).monospacedDigit()
-                    .foregroundStyle(Show.isGain(trade.pnl) == true ? .green : .red)
+                    .foregroundStyle(Show.tint(trade.pnl))
             }
             HStack {
                 Text("\(Show.quantity(trade.quantity)) closed \(Stamp.short(trade.at))")

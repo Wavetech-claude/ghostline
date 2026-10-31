@@ -173,8 +173,8 @@ struct MemoCard: View {
 
     private var tint: Color {
         switch memo.call {
-        case "buy": .green
-        case "avoid": .red
+        case "buy": .gain
+        case "avoid": .loss
         default: .orange
         }
     }

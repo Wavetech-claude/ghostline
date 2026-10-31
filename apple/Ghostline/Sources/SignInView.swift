@@ -61,10 +61,10 @@ struct NightField: View {
     }
 }
 
-/// The mark: a single line that fades at both ends.
+/// The mark: a single ghost-blue line that fades at both ends.
 struct GhostLineMark: View {
     var body: some View {
-        LinearGradient(colors: [.clear, Color(red: 0.839, green: 0.886, blue: 1), .clear], startPoint: .leading, endPoint: .trailing)
-            .shadow(color: Color(red: 0.839, green: 0.886, blue: 1).opacity(0.6), radius: 10)
+        LinearGradient(colors: [.clear, Color.ghost, .clear], startPoint: .leading, endPoint: .trailing)
+            .shadow(color: Color.ghost.opacity(0.6), radius: 10)
     }
 }
