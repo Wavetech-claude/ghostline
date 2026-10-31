@@ -133,6 +133,18 @@ class Jobs:
         return {"sessions": store.save_sessions(self.db, sessions, start, end, "alpaca", utcnow()),
                 "through": sessions[-1].day.isoformat()}
 
+    def pull_corporate_actions(self, today: dt.date | None = None) -> dict:
+        """Splits and cash dividends for every tracked ticker, ex-dates from 40 days back (a dividend is paid weeks
+        after it goes ex) to 40 days ahead, in one call."""
+        tickers = store.tracked_tickers(self.db)
+        if not tickers:
+            return {"actions": 0}
+        today = today or dt.date.today()
+        alpaca: Alpaca = self.sources["alpaca"]
+        found = self._call("alpaca", "corporate-actions", alpaca.corporate_actions, tickers,
+                           today - dt.timedelta(days=40), today + dt.timedelta(days=40))
+        return {"actions": store.save_actions(self.db, found, "alpaca", utcnow()) if found else 0}
+
     def pull_macro(self) -> dict:
         fred: FRED = self.sources["fred"]
         out = {"points": 0}

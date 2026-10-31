@@ -23,4 +23,11 @@ import Testing
         let body = try #require(String(data: try GhostlineJSON.encoder().encode(input), encoding: .utf8))
         #expect(body.contains(#""idea_id":7"#) && !body.contains("memo_id"))
     }
+
+    @Test func pendingCorporateActionsDecode() throws {
+        let json = #"{"pending":[{"id":"div-1","kind":"cash_dividend","ticker":"NVDA","ex_date":"2024-06-11","payable_date":"2024-06-28","shares":"50","amount":"0.50","new_rate":null,"old_rate":null,"text":"NVDA dividend: 0.50 (0.01 a share on 50)"}]}"#
+        let p = try GhostlineJSON.decoder().decode(PendingActions.self, from: Data(json.utf8))
+        #expect(p.pending.first?.isDividend == true && p.pending.first?.payableDate == "2024-06-28")
+        #expect(p.pending.first?.amount == "0.50" && p.pending.first?.newRate == nil)
+    }
 }

@@ -22,6 +22,19 @@ class SourceError(Exception):
 
 
 @dataclass(frozen=True)
+class CorporateAction:
+    id: str
+    kind: str                       # forward_split | reverse_split | cash_dividend
+    ticker: str
+    ex_date: dt.date
+    record_date: dt.date | None
+    payable_date: dt.date | None
+    old_rate: Decimal | None        # splits: old and new counts
+    new_rate: Decimal | None
+    rate: Decimal | None            # a cash dividend, per share
+
+
+@dataclass(frozen=True)
 class MarketSession:
     day: dt.date
     opens_at: dt.datetime

@@ -319,7 +319,7 @@ def test_a_monthly_statement_in_json_csv_and_pdf(client):
                                             "fees": "1", "at": f"2026-10-{day}T14:30:00Z"}, headers=h).status_code == 201
     s = client.get("/statements?book=practice&month=2026-10", headers=h).json()
     assert (s["deposits"], s["fees"], s["realized_pnl"], s["cash_at_end"]) == ("1000.00", "2.00", "98.00", "1098.00")
-    assert s["dividends"] is None and "not tracked" in s["dividends_note"] and len(s["trades"]) == 2
+    assert s["dividends"] == "0.00" and s["dividends_note"] == "cash dividends paid in the month" and len(s["trades"]) == 2
     sept = client.get("/statements?book=practice&month=2026-09", headers=h).json()
     assert sept["trades"] == [] and sept["realized_pnl"] == "0.00" and sept["cash_at_end"] == "0.00"
     csv_r = client.get("/statements?book=practice&month=2026-10&format=csv", headers=h)

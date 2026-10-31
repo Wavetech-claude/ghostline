@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.17.0] — unreleased
+
+- Stock splits and cash dividends (corporate actions), from Alpaca every morning for your stocks.
+  - The practice, AI, options and S&P 500 ghost books take them on their own: a split on its ex-date, before the
+    session, and a dividend on its payable date, on the shares held when the stock went ex.
+  - Your real book waits for you. Today shows each one ("NVDA 10-for-1 split: 5 shares become 50"). Confirm when your
+    broker shows it, or tap "Not in My Account". A dividend can be confirmed at the amount your broker paid.
+  - A split keeps your total cost: 10 shares at $100 become 40 at $25, so no gain appears from the split itself. A
+    reverse split is exact (30 shares become 10). A dividend comes in as return, not as money you paid in.
+  - Monthly statements now show the month's cash dividends.
+- Fixed in the same change: stored prices are split-adjusted, so Value Over Time now counts past shares in today's
+  terms. A 2-for-1 split no longer halves the days before it or doubles its own day.
+
 ## [0.16.0] — unreleased
 
 - Reconcile (Account → Reconcile), month by month, as the owner designed it.

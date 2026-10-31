@@ -45,6 +45,7 @@ struct TodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 GetStartedCard(watching: watching)
+                PendingActionsCard()
                 BriefCard()
                 if !todos.isEmpty {
                     NavigationLink { TodoListView() } label: {
