@@ -18,6 +18,12 @@ final class LedgerModel {
     var showingCashFlow = false       // the cash sheet, opened from Account or the menu bar (⇧⌘N)
     var cashFlowBook: String?         // the book the cash sheet opens on (AI trader, options practice)
     var prefillTodo: TodoItem?        // "I Placed It": the trade sheet opens filled from this to-do item
+    var prefillIdea: IdeaRow?         // "I Bought It": the trade sheet opens filled from this idea
+
+    func logBought(_ idea: IdeaRow) {
+        prefillIdea = idea
+        showingTradeForm = true
+    }
 
     func logPlaced(_ todo: TodoItem) {
         prefillTodo = todo

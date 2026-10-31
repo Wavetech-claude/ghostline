@@ -67,10 +67,12 @@ public struct TradeInput: Codable, Sendable, Equatable {
     public var note: String?
     public var optionSymbol: String?
     public var lane: String?
+    public var ideaId: Int?             // the suggestion it follows, so reconciliation sees it was taken
+    public var memoId: Int?
 
     public init(book: String, ticker: String, asset: String = "stock", side: String, quantity: String, fill: String,
                 at: String, fees: String = "0", broker: String? = nil, note: String? = nil, optionSymbol: String? = nil,
-                lane: String? = nil) {
+                lane: String? = nil, ideaId: Int? = nil, memoId: Int? = nil) {
         self.book = book
         self.ticker = ticker
         self.asset = asset
@@ -83,6 +85,8 @@ public struct TradeInput: Codable, Sendable, Equatable {
         self.note = note
         self.optionSymbol = optionSymbol
         self.lane = lane
+        self.ideaId = ideaId
+        self.memoId = memoId
     }
 }
 
@@ -296,6 +300,15 @@ public struct TradeFilters: Sendable, Equatable {
 public enum Stamp {
     public static func string(_ date: Date) -> String {
         date.formatted(.iso8601)
+    }
+
+    /// The calendar day a person sees for `date`, as "yyyy-MM-dd" (a day picked in a form, "today"). `.iso8601` writes
+    /// the UTC day, which in Pacific time is already tomorrow from 17:00 (16:00 in summer).
+    public static func localDay(_ date: Date, in zone: TimeZone = .current) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     public static func date(_ iso: String) -> Date? {

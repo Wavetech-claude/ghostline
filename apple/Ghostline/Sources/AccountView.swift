@@ -49,6 +49,9 @@ struct AccountView: View {
                 NavigationLink { JournalView() } label: {
                     Label("Journal", systemImage: "book.closed")
                 }
+                NavigationLink { ReconcileView() } label: {
+                    Label("Reconcile", systemImage: "arrow.left.arrow.right")
+                }
             }
             Section {
                 NavigationLink { GuideView() } label: { Label("How to Use Ghostline", systemImage: "questionmark.circle") }

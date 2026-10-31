@@ -84,7 +84,7 @@ struct InvestSheet: View {
     private func split() async {
         busy = true
         defer { busy = false }
-        let day = date.formatted(.iso8601.year().month().day())
+        let day = Stamp.localDay(date)            // the day picked, not its UTC day
         do {
             plan = try await session.client.invest(amount: amount, forDate: day, book: book)
             problem = nil

@@ -43,7 +43,10 @@ def _ready(client):
          "VALUES ('AAPL', 102.9, 103.1, 103, now(), 'alpaca', now(), true)")
     flow(client, h, "practice", 5000, today - dt.timedelta(days=10))
     long_ago = (dt.datetime.now(dt.UTC) - dt.timedelta(days=4)).isoformat()
-    just_now = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)).isoformat()
+    # "this session": a minute ago, but never before New York's midnight. Run in the first minute of a New York day,
+    # a minute ago was yesterday there, and the five shares stopped counting as bought this session (2026-10-30)
+    just_now = max(dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1),
+                   dt.datetime.combine(today, dt.time(0, 0, 1), tzinfo=NEW_YORK)).isoformat()
     iid = idea("AAPL", lane="swing", stop=95, target=120)
     for body in ({"quantity": "10", "fill": "80", "at": long_ago, "idea_id": iid},
                  {"quantity": "5", "fill": "102", "at": just_now, "fees": "1"}):

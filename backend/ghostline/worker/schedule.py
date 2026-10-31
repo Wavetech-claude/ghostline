@@ -13,7 +13,7 @@ from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ghostline import alerts, storage
+from ghostline import alerts, reconcile, storage
 from ghostline.ai_trader import AITrader
 from ghostline.claude import push
 from ghostline.claude.jobs import Jobs as ClaudeJobs
@@ -84,6 +84,9 @@ def register(
             return {"skipped": "after the close: practice orders fill only while the market is open"}
         return p.fill_open_orders()
 
+    def reconcile_reminder() -> dict:
+        return reconcile.remind(db, settings)
+
     def scan_ideas() -> dict:
         s = Scan(db)
         out = s.run()
@@ -124,6 +127,8 @@ def register(
         ("learning_run", learning_run, CronTrigger(day_of_week="mon-fri", hour=13, minute=15, timezone=PT)),
         ("weekly_eval", weekly_eval, CronTrigger(day_of_week="sun", hour=7, minute=0, timezone=PT)),
         ("weekly_digest", digest_and_push, CronTrigger(day_of_week="sun", hour=7, minute=30, timezone=PT)),
+        # reconciliation: on the month's first trading day, a reminder to check the real book against the statement
+        ("reconcile_reminder", reconcile_reminder, CronTrigger(day="1-7", hour=7, minute=0, timezone=PT)),
     ]
     if settings.ghostline_env == "staging":
         plan = [p for p in plan if p[0] not in PULLS]

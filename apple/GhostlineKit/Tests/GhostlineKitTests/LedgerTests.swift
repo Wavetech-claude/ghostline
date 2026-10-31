@@ -68,4 +68,12 @@ import Testing
         let r = try await c.saveRiskRules([RuleInput(key: "max_open_ideas", value: "5", enabled: true)])
         #expect(r.complete && FakeServer.seen(host).first?.httpMethod == "PUT")
     }
+
+    @Test func aPickedDayIsTheDayThePersonSeesNotTheUTCDay() throws {
+        let evening = try #require(Stamp.date("2026-10-31T04:30:00Z"))      // 21:30 on Oct 30 in Los Angeles
+        let la = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        #expect(Stamp.localDay(evening, in: la) == "2026-10-30")
+        #expect(Stamp.localDay(evening, in: try #require(TimeZone(identifier: "UTC"))) == "2026-10-31")
+        #expect(Stamp.localDay(evening, in: try #require(TimeZone(identifier: "Asia/Kolkata"))) == "2026-10-31")
+    }
 }

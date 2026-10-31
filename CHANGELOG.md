@@ -2,6 +2,23 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.16.0] — unreleased
+
+- Reconcile (Account → Reconcile), month by month, as the owner designed it.
+  - What the app suggested against what you did. Each idea that passed your rules, and each memo's buy call, is
+    "you took it" (a real trade carries it, or its to-do was closed with a trade), "you said no", "lapsed", or
+    "still open". A real buy with no suggestion behind it is your own call.
+  - Each shows its paper result against the S&P 500 and, when taken, its realized P&L to date. The month's summary
+    says what saying no avoided or missed.
+  - Against your broker: type in a statement (date, cash, stock holdings) and see where the real book differs, as
+    of that day. Options are not compared yet.
+  - On the month's first trading day, a notification reminds you to check against your statement.
+- On an idea: "I Bought It" opens the trade form filled from the idea, and "Not for Me" records your no, with an
+  optional reason, and can be undone.
+- Fixed: a real trade logged from a to-do or an idea now carries the idea it follows.
+- Fixed: a date picked in the evening was sent as the next day. `.iso8601` writes the UTC day, which in Pacific time
+  is already tomorrow from 16:00 or 17:00. "Invest This" and the new statement now send the day you picked.
+
 ## [0.15.0] — unreleased
 
 - Help inside the app: "How to Use Ghostline", from the question mark on Today and from Account. It covers what the
