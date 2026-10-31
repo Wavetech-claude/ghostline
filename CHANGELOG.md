@@ -2,6 +2,15 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.15.0] — unreleased
+
+- Help inside the app: "How to Use Ghostline", from the question mark on Today and from Account. It covers what the
+  app does, setting up in four steps, a trading day hour by hour, the five tabs, ideas and your rules, practice and
+  real money, Ask Ghostline, the AI trader and its ghost, reading the numbers, and your data.
+- Get Started on Today: four steps that tick themselves from your data (risk rules saved, practice money added, a
+  stock watched, a real holding logged), each one tap away. The card leaves once all four are done. It replaces
+  the old "Before anything else" note.
+
 ## [0.14.0] — unreleased
 
 - Portfolio, Robinhood-style, in the Ghost look:
