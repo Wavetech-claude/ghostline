@@ -37,7 +37,7 @@ struct RiskRulesView: View {
                         if let at = rule.updatedAt { Text("Saved \(Stamp.short(at))") }
                     }
                 }
-                if let problem { Text(problem).foregroundStyle(.red).font(.footnote) }
+                if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             } else if let error = ledger.error {
                 Text(error).foregroundStyle(.secondary)
             } else {

@@ -111,18 +111,10 @@ struct PnLRow: View {
     var body: some View {
         LabeledContent(title) {
             if let value {
-                Text(Show.signedMoney(value)).monospacedDigit().foregroundStyle(Self.tint(value))
+                Text(Show.signedMoney(value)).monospacedDigit().foregroundStyle(Show.tint(value))
             } else {
                 Text(missing).foregroundStyle(.secondary)
             }
-        }
-    }
-
-    static func tint(_ s: String?) -> Color {
-        switch Show.isGain(s) {
-        case .some(true): .green
-        case .some(false): .red
-        case .none: .primary
         }
     }
 }

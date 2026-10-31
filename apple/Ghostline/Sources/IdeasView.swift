@@ -94,13 +94,13 @@ struct IdeaCard: View {
                 Text(idea.module.replacingOccurrences(of: "_", with: " ")).font(.caption).foregroundStyle(.secondary)
                 if idea.isLive {
                     Text("Live").font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.green.opacity(0.18), in: .capsule).foregroundStyle(.green)
+                        .background(.gain.opacity(0.18), in: .capsule).foregroundStyle(.gain)
                         .accessibilityLabel("Live: its module graduated in practice")
                 }
                 Spacer()
                 Text("\(Show.score(idea.score))").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Text(idea.status.capitalized).font(.caption)
-                    .foregroundStyle(idea.isOpen ? Color.green : Color.red)
+                    .foregroundStyle(idea.isOpen ? Color.gain : Color.loss)
             }
             Text(idea.reason).font(.callout)
             if idea.isOpen {

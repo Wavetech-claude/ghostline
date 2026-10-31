@@ -127,8 +127,8 @@ struct TickerView: View {
                             }
                             .font(.callout)
                             if let move = e.movePct {
-                                Text("Moved \(move.hasPrefix("-") ? "" : "+")\(Show.percent(move)) from the close before to the close after")
-                                    .font(.caption).foregroundStyle(PnLRow.tint(move))
+                                Text("Moved \(Show.signedPercent(move)) from the close before to the close after")
+                                    .font(.caption).foregroundStyle(Show.tint(move))
                             }
                             Text("\(e.source) · as of \(Stamp.short(e.asOf))").font(.caption2).foregroundStyle(.tertiary)
                         }

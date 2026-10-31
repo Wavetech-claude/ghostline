@@ -28,7 +28,7 @@ struct JournalView: View {
                                 Text(lane.lane.capitalized).font(.headline)
                                 Spacer()
                                 if lane.graduated {
-                                    Label("Graduated", systemImage: "checkmark.seal.fill").foregroundStyle(.green).font(.caption)
+                                    Label("Graduated", systemImage: "checkmark.seal.fill").foregroundStyle(.gain).font(.caption)
                                 }
                             }
                             ProgressView(value: Double(min(lane.settledN, j.graduationN)), total: Double(j.graduationN))
@@ -49,7 +49,7 @@ struct JournalView: View {
                                 }
                                 Spacer()
                                 Text("× \(Show.plainNumber(m.weight))").monospacedDigit()
-                                if m.graduated { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
+                                if m.graduated { Image(systemName: "checkmark.seal.fill").foregroundStyle(.gain) }
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -80,7 +80,7 @@ struct JournalView: View {
                                 }
                                 Spacer()
                                 Text(pct(r.excessPct)).monospacedDigit()
-                                    .foregroundStyle(Show.isGain(r.excessPct) == true ? Color.green : Color.red)
+                                    .foregroundStyle(Show.tint(r.excessPct))
                             }
                         }
                     }

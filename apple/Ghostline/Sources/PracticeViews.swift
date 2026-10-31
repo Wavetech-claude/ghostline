@@ -108,8 +108,8 @@ struct OrderRowView: View {
 
     private var tint: Color {
         switch order.status {
-        case "filled": .green
-        case "refused": .red
+        case "filled": .gain
+        case "refused": .loss
         case "open": .blue
         default: .secondary
         }
@@ -205,7 +205,7 @@ struct OrderTicketView: View {
                 Section {
                     TextField("Note", text: $note, axis: .vertical)
                 }
-                if let problem { Text(problem).foregroundStyle(.red).font(.footnote) }
+                if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             }
             .formStyle(.grouped)
             .navigationTitle(asset == "stock" ? "Practice Order" : "Practice Put")
@@ -267,12 +267,12 @@ struct OrderOutcome: View {
             switch order.status {
             case "filled":
                 Label("Filled at \(Show.money(order.fillPrice))", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.gain)
             case "open":
                 Label("Open, waiting for the quote", systemImage: "clock")
                     .foregroundStyle(.blue)
             default:
-                Label("Refused", systemImage: "hand.raised.fill").foregroundStyle(.red)
+                Label("Refused", systemImage: "hand.raised.fill").foregroundStyle(.loss)
             }
             if let reason = order.reason { Text(reason).font(.footnote).foregroundStyle(.secondary) }
         }
@@ -368,7 +368,7 @@ struct OptionRowView: View {
                 Spacer()
                 if let c = option.collateral {
                     Label(Show.money(c), systemImage: option.covered ? "checkmark.shield" : "xmark.shield")
-                        .foregroundStyle(option.covered ? Color.green : Color.secondary)
+                        .foregroundStyle(option.covered ? Color.gain : Color.secondary)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)

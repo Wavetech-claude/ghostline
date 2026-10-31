@@ -109,7 +109,7 @@ struct AddAlertSheet: View {
                         .keyboardType(.decimalPad)
                         #endif
                 }
-                if let problem { Text(problem).foregroundStyle(.red).font(.footnote) }
+                if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             }
             .formStyle(.grouped)
             .navigationTitle("Add Alert")
