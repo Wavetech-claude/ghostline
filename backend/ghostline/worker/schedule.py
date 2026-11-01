@@ -30,8 +30,8 @@ from ghostline.practice import Practice
 
 PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
-PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "build_universe", "pull_bars",
-         "pull_corporate_actions",
+PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "build_universe", "pull_eps_history",
+         "pull_bars", "pull_corporate_actions",
          "pull_news_earnings", "pull_fundamentals", "pull_chains", "pull_quotes")
 
 
@@ -103,6 +103,7 @@ def register(
         ("pull_tickers", j.pull_tickers, CronTrigger(hour=4, minute=40, timezone=PT)),
         ("pull_tone", j.pull_tone, CronTrigger(hour="0-4", minute="0,30", timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
+        ("pull_eps_history", j.pull_eps_history, CronTrigger(day_of_week="mon-fri", hour=5, minute=10, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
         # splits and dividends: pulled (production), then applied to every environment's books before the scan
         ("pull_corporate_actions", j.pull_corporate_actions, CronTrigger(hour=5, minute=20, timezone=PT)),

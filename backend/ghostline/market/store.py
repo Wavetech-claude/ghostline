@@ -266,3 +266,31 @@ def search_tickers(db: Database, q: str, limit: int = 20) -> list[dict]:
         "ORDER BY (t.ticker = upper(%s)) DESC, (t.ticker ILIKE %s) DESC, length(t.ticker), t.ticker LIMIT %s",
         (like + "%", "%" + like + "%", q, like + "%", limit))
 
+
+def cik_of(db: Database, ticker: str) -> str | None:
+    row = db.fetch_one("SELECT cik FROM tickers WHERE ticker = %s", (ticker,))
+    return row["cik"] if row else None
+
+
+def eps_fetched_at(db: Database, ticker: str) -> dt.datetime | None:
+    row = db.fetch_one("SELECT max(as_of) AS at FROM eps_history WHERE ticker = %s", (ticker,))
+    return row["at"] if row else None
+
+
+def save_eps(db: Database, ticker: str, quarters: list[tuple[dt.date, Decimal]],
+             years: list[tuple[dt.date, Decimal, Decimal | None]], source: str, as_of: dt.datetime) -> int:
+    rows = [("quarter", end, eps, None) for end, eps in quarters] + [("year", end, eps, rev) for end, eps, rev in years]
+    with db.connection() as conn:
+        for kind, end, eps, rev in rows:
+            conn.execute("INSERT INTO eps_history (ticker, kind, period_end, eps, revenue, source, as_of) "
+                         "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ticker, kind, period_end) DO UPDATE SET "
+                         "eps = EXCLUDED.eps, revenue = EXCLUDED.revenue, source = EXCLUDED.source, "
+                         "as_of = EXCLUDED.as_of", (ticker, kind, end, eps, rev, source, as_of))
+        conn.commit()
+    return len(rows)
+
+
+def eps_history(db: Database, ticker: str) -> list[dict]:
+    return db.fetch_all("SELECT kind, period_end, eps, revenue, source, as_of FROM eps_history WHERE ticker = %s "
+                        "ORDER BY period_end DESC", (ticker,))
+
