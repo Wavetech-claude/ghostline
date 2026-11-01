@@ -2,6 +2,12 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.18.0] — unreleased
+
+- An idea and a holding now open the stock page you know from the Watchlist (price chart with drag-to-read, news,
+  earnings, your memos and holdings), instead of the multi-panel analysis chart. That chart is still one tap away as
+  "Advanced Chart".
+
 ## [0.17.4] — unreleased
 
 - Proof run E6b is over: `/health` no longer turns unhealthy without `GHOSTLINE_E6B_CANARY`. Nothing in the app changes.

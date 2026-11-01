@@ -74,11 +74,11 @@ struct PositionDetailView: View {
                     }
                 }
                 Section {
-                    NavigationLink { ChartsView(ticker: ticker) } label: {
-                        Label("Chart", systemImage: "chart.xyaxis.line")
-                    }
                     NavigationLink { TickerView(ticker: ticker) } label: {
-                        Label("News, Earnings and Filings", systemImage: "newspaper")
+                        Label("\(ticker): Price, News and Earnings", systemImage: "chart.xyaxis.line")
+                    }
+                    NavigationLink { ChartsView(ticker: ticker) } label: {
+                        Label("Advanced Chart", systemImage: "chart.bar.xaxis")
                     }
                 }
             } else if let error {
