@@ -1,22 +1,26 @@
 import Foundation
 
-// Corporate actions waiting for the owner in the real book: a split or a cash dividend the simulated books already
-// took. Confirming writes it into the ledger (a dividend with the amount the broker paid); dismissing says the broker
-// does not show it.
+// Corporate actions waiting for the owner in the real book: a split, a cash dividend, a ticker change or a merger the
+// simulated books already took. Confirming writes it into the ledger (cash with the amount the broker paid); dismissing
+// says the broker does not show it.
 
 public struct PendingAction: Codable, Sendable, Equatable, Identifiable {
     public let id: String
-    public let kind: String             // forward_split | reverse_split | cash_dividend
+    public let kind: String             // forward_split | reverse_split | cash_dividend | name_change |
+                                        // stock_merger | cash_merger | stock_and_cash_merger
     public let ticker: String
     public let exDate: String
     public let payableDate: String?
     public let shares: String
-    public let amount: String?          // a dividend's expected cash
+    public let amount: String?          // the expected cash: a dividend or a merger's
     public let newRate: String?
     public let oldRate: String?
+    public let newTicker: String?       // a ticker change's new symbol, a merger's buyer
     public let text: String
 
     public var isDividend: Bool { kind == "cash_dividend" }
+    /// Cash reaches the account, so the owner may correct the amount to what the broker paid.
+    public var paysCash: Bool { ["cash_dividend", "cash_merger", "stock_and_cash_merger"].contains(kind) }
 }
 
 public struct PendingActions: Codable, Sendable, Equatable {

@@ -165,8 +165,8 @@ class Jobs:
                 "through": sessions[-1].day.isoformat()}
 
     def pull_corporate_actions(self, today: dt.date | None = None) -> dict:
-        """Splits and cash dividends for every tracked ticker, ex-dates from 40 days back (a dividend is paid weeks
-        after it goes ex) to 40 days ahead, in one call."""
+        """Splits, cash dividends, name changes and mergers for every tracked ticker, dated from 40 days back (a
+        dividend is paid weeks after it goes ex) to 40 days ahead, in one call."""
         tickers = store.tracked_tickers(self.db)
         if not tickers:
             return {"actions": 0}

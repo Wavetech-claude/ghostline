@@ -31,6 +31,13 @@ import Testing
         #expect(p.pending.first?.amount == "0.50" && p.pending.first?.newRate == nil)
     }
 
+    @Test func mergersDecodeAndPayCash() throws {
+        let json = #"{"pending":[{"id":"cm-1","kind":"cash_merger","ticker":"BUY","ex_date":"2025-03-03","payable_date":"2025-03-03","shares":"5","amount":"64.40","new_rate":null,"old_rate":null,"new_ticker":null,"text":"BUY bought out for cash: 5 shares at 12.88 = 64.40"},{"id":"nc-1","kind":"name_change","ticker":"OLDT","ex_date":"2025-03-03","payable_date":null,"shares":"10","amount":null,"new_rate":"1","old_rate":"1","new_ticker":"NEWT","text":"OLDT is now NEWT: 10 shares move to NEWT at the same cost"}]}"#
+        let p = try GhostlineJSON.decoder().decode(PendingActions.self, from: Data(json.utf8))
+        #expect(p.pending[0].paysCash && !p.pending[0].isDividend)
+        #expect(!p.pending[1].paysCash && p.pending[1].newTicker == "NEWT")
+    }
+
     @Test func yourEdgeDecodes() throws {
         let json = #"{"groups":[{"module":"vcp","lane":"swing","took":1,"declined":1,"lapsed":0,"open":0,"decided":2,"take_rate":"0.50","fit":"1.0000","real_pct_avg":"8.00","real_n":1,"gap_pct_avg":"-2.00","gap_n":1,"skipped_excess_avg":"-5.00","skipped_n":1}],"totals":{"took":1,"declined":1,"lapsed":0,"open":0,"decided":2},"note":"Module weights learn from paper results only."}"#
         let e = try GhostlineJSON.decoder().decode(YourEdge.self, from: Data(json.utf8))

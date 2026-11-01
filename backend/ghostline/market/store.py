@@ -98,11 +98,13 @@ def save_actions(db: Database, actions: list[CorporateAction], source: str, as_o
     with db.connection() as conn:
         for a in actions:
             conn.execute("INSERT INTO corporate_actions (id, kind, ticker, ex_date, record_date, payable_date, "
-                         "old_rate, new_rate, rate, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                         "old_rate, new_rate, rate, new_ticker, source, as_of) "
+                         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                          "ON CONFLICT (id) DO UPDATE SET payable_date = EXCLUDED.payable_date, rate = EXCLUDED.rate, "
-                         "old_rate = EXCLUDED.old_rate, new_rate = EXCLUDED.new_rate, as_of = EXCLUDED.as_of",
+                         "old_rate = EXCLUDED.old_rate, new_rate = EXCLUDED.new_rate, "
+                         "new_ticker = EXCLUDED.new_ticker, as_of = EXCLUDED.as_of",
                          (a.id, a.kind, a.ticker, a.ex_date, a.record_date, a.payable_date, a.old_rate, a.new_rate,
-                          a.rate, source, as_of))
+                          a.rate, a.new_ticker, source, as_of))
         conn.commit()
     return len(actions)
 

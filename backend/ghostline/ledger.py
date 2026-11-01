@@ -24,18 +24,20 @@ class Trade:
     book_id: int
     ticker: str
     asset: str          # stock | option
-    side: str           # buy | sell | sell_to_open | buy_to_close
+    side: str           # buy | sell | sell_to_open | buy_to_close; corporate actions: split | dividend |
+                        # convert_out | convert_in | cash_out | cash_in (migrations 0011, 0014)
     quantity: Decimal
     fill: Decimal
     fees: Decimal
     at: Any
     option_symbol: str | None = None    # options: the contract; each contract is its own lot queue
+    related_ticker: str | None = None   # a conversion: the other ticker (convert_out names the new, convert_in the old)
 
     @classmethod
     def from_row(cls, r: dict) -> Trade:
         return cls(id=r["id"], book_id=r["book_id"], ticker=r["ticker"], asset=r["asset"], side=r["side"],
                    quantity=Decimal(r["quantity"]), fill=Decimal(r["fill"]), fees=Decimal(r["fees"] or 0), at=r["at"],
-                   option_symbol=r.get("option_symbol"))
+                   option_symbol=r.get("option_symbol"), related_ticker=r.get("related_ticker"))
 
     @property
     def opens(self) -> bool:
@@ -110,9 +112,15 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
     guesses). A short leg
     (sold to open) carries its premium as a negative cost and its close pays, so its proceeds are negative; the
     P&L is proceeds minus cost either way. A split (quantity = the new count, fill = the old) turns every open lot's
-    shares into shares × new / old at the same cost; a dividend moves only cash (cash_balance)."""
+    shares into shares × new / old at the same cost; a dividend moves only cash (cash_balance).
+
+    Ticker changes and mergers (migration 0014): a convert_out takes every open lot off the old ticker and the
+    convert_in written with it puts them on the new one, each lot's shares × received / held at the same total cost,
+    in date order among any lots already there. A cash_out closes lots like a sale whose fill is the cash paid for all
+    the shares; a cash_in (a merger's cash part) is realized with no cost: the cost stays with the new shares."""
     lots: dict[tuple[int, str, str, str], list[Lot]] = defaultdict(list)
     closed: list[Closed] = []
+    moving: dict[tuple[int, str, str, Any], list[Lot]] = {}
     for t in sorted(trades, key=lambda x: (x.at, x.id)):
         key = (t.book_id, t.ticker, t.asset, t.option_symbol or "")     # two puts on one stock never share lots
         m = t.multiplier
@@ -122,6 +130,22 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
                 lot.cost_per_unit = lot.cost_per_unit * t.fill / t.quantity
             continue
         if t.side == "dividend":
+            continue
+        if t.side == "convert_out":
+            moving[(t.book_id, t.ticker, t.related_ticker or "", t.at)] = lots.pop(key, [])
+            continue
+        if t.side == "convert_in":
+            moved = moving.pop((t.book_id, t.related_ticker or "", t.ticker, t.at), [])
+            held = sum((lot.quantity for lot in moved), Decimal(0))
+            if held > 0:
+                factor = t.quantity / held
+                for lot in moved:
+                    lot.quantity = lot.quantity * factor
+                    lot.cost_per_unit = lot.cost_per_unit / factor
+                lots[key] = sorted(lots[key] + moved, key=lambda lot: (lot.at, lot.trade_id))
+            continue
+        if t.side == "cash_in":
+            closed.append(Closed(t.id, t.book_id, t.ticker, t.quantity, money(t.fill - t.fees), money(0), t.at, ()))
             continue
         if t.opens:
             fee_per_unit = t.fees / t.quantity if t.quantity else Decimal(0)
@@ -142,7 +166,10 @@ def settle(trades: list[Trade]) -> tuple[list[Closed], list[Position]]:
                 lots[key].pop(0)
         closed_qty = t.quantity - left
         if closed_qty > 0:
-            proceeds = -(closed_qty * t.fill * m + t.fees) if t.short else closed_qty * t.fill * m - t.fees
+            if t.side == "cash_out":        # its fill is the cash for all its shares; part of it if fewer were held
+                proceeds = t.fill * closed_qty / t.quantity - t.fees
+            else:
+                proceeds = -(closed_qty * t.fill * m + t.fees) if t.short else closed_qty * t.fill * m - t.fees
             closed.append(Closed(t.id, t.book_id, t.ticker, closed_qty, money(proceeds), money(cost), t.at,
                                  tuple(dict.fromkeys(matched))))
     positions = []
@@ -187,10 +214,13 @@ def totals(closed: list[Closed]) -> dict[str, Any]:
 
 def cash_balance(flows: list[Decimal], trades: list[Trade]) -> Decimal:
     """Deposits and withdrawals, minus what was paid for opens, plus what closes and dividends brought in, minus
-    fees. A split moves no cash."""
+    fees. A split or a conversion moves no cash; a merger's cash is its fill."""
     bal = sum(flows, Decimal(0))
     for t in trades:
-        if t.side == "split":
+        if t.side in ("split", "convert_out", "convert_in"):
+            continue
+        if t.side in ("cash_out", "cash_in"):
+            bal += t.fill - t.fees
             continue
         if t.side in ("buy", "buy_to_close"):
             bal -= t.quantity * t.fill * t.multiplier + t.fees
