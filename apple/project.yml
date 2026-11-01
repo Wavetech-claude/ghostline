@@ -55,6 +55,7 @@ targets:
         LSApplicationCategoryType: public.app-category.finance
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "Ghostline is a research tool for its owner, not investment advice."
+        NSFaceIDUsageDescription: "Ghostline uses Face ID to lock the app, so only you can open it."
         GHOSTLINE_API_BASE_URL: $(GHOSTLINE_API_BASE_URL)
         GHOSTLINE_ENVIRONMENT: $(GHOSTLINE_ENVIRONMENT)
     settings:

@@ -108,8 +108,10 @@ struct TodayView: View {
 struct SettingsView: View {
     @Environment(SessionModel.self) private var session
     @Environment(LedgerModel.self) private var ledger
+    @Environment(AppLock.self) private var lock
 
     var body: some View {
+        @Bindable var lock = lock
         Form {
             Section {
                 NavigationLink {
@@ -123,6 +125,13 @@ struct SettingsView: View {
                         }
                     } icon: { Image(systemName: "shield.lefthalf.filled") }
                 }
+            }
+            Section {
+                Toggle("Lock with \(lock.method)", isOn: $lock.enabled)
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("Asks when Ghostline opens and when you come back after more than a minute away.")
             }
             Section("Backend") {
                 LabeledContent("Address", value: session.configuration.baseURL.host() ?? "")

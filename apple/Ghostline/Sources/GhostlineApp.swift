@@ -11,6 +11,7 @@ struct GhostlineApp: App {
     @State private var session: SessionModel
     @State private var ledger: LedgerModel
     @State private var practice: PracticeModel
+    @State private var lock = AppLock()
 
     init() {
         let s = SessionModel.fromBundle()
@@ -22,6 +23,7 @@ struct GhostlineApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environment(lock)
                 .environment(session)
                 .environment(ledger)
                 .environment(practice)
@@ -47,6 +49,7 @@ struct GhostlineApp: App {
         #if os(macOS)
         Settings {
             NavigationStack { SettingsView() }
+                .environment(lock)
                 .environment(session)
                 .environment(ledger)
                 .environment(practice)
