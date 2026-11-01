@@ -2,6 +2,13 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.21.0] — unreleased
+
+- Face ID lock (Touch ID on the Mac, your device passcode as the fallback). Ghostline asks when it opens and when you
+  come back after more than a minute away; while it is locked or in the app switcher, your numbers are covered on
+  iPhone and iPad. On by default; turn it off under Settings → Security. A device with no passcode cannot lock the app:
+  the lock screen says so and lets you continue without it.
+
 ## [0.20.0] — unreleased
 
 - Long-term ideas can appear now. The long-term module (CANSLIM) needs a stock's earnings growth: the latest quarter
