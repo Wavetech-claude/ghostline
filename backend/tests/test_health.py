@@ -79,11 +79,3 @@ def test_docs_are_off():
     with TestClient(app) as c:
         assert c.get("/docs").status_code == 404 and c.get("/openapi.json").status_code == 404
     assert os.environ.get("ANTHROPIC_API_KEY") is None or True
-
-
-def test_health_is_503_without_the_e6_setting():
-    """Proof run E6 (0.17.1 only): production lacks the setting, so its health fails and the rollback watch must act."""
-    app = create_app(settings(GHOSTLINE_E6_CANARY=""))
-    with TestClient(app) as c:
-        r = c.get("/health")
-    assert r.status_code == 503 and r.json()["reason"] == "setting GHOSTLINE_E6_CANARY missing"

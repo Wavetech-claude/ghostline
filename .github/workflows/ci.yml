@@ -75,7 +75,6 @@ jobs:
           DATABASE_URL: postgresql://ghostline:ci@postgres:5432/ghostline_test
           GHOSTLINE_SESSION_SECRET: ci-only-session-secret-0123456789abcdef
           GHOSTLINE_OWNER_APPLE_ID: qa+owner@example.com
-          GHOSTLINE_E6_CANARY: "on"   # proof run E6 (0.17.1 only): CI stands for staging, which has it
         run: |
           python - <<'PY'
           import psycopg
