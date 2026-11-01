@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.23.0] — unreleased
+
+- Ticker changes and mergers, the way splits and dividends already work. When a stock you hold changes its ticker, or
+  is bought by another company, your practice, AI trader and options books follow on their own:
+  - a ticker change moves your shares to the new ticker at the same cost;
+  - a stock merger turns them into the buyer's shares at the deal's rate, at the same cost;
+  - a cash buyout closes them at the cash price, so the gain or loss is realized;
+  - a stock-and-cash deal does both: the shares convert with their whole cost, and the cash counts as realized gain.
+- Your real book waits for you, as with splits: Today lists each one to confirm or dismiss against your broker, and a
+  buyout's cash can be corrected to what the broker paid.
+- Positions, history, the value-over-time graph and statements all follow the new ticker.
+
 ## [0.22.2] — unreleased
 
 - Langfuse shows the real number of prompt tokens for each Claude call. It showed only the uncached tail (2 tokens for a

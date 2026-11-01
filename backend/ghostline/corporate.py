@@ -1,14 +1,24 @@
-"""Corporate actions (the owner kept the proposed item, 2026-10-30): Alpaca's splits and cash dividends, applied to the
-books that held the stock.
+"""Corporate actions (the owner kept the proposed item, 2026-10-30; ticker changes and mergers accepted 2026-11-01):
+Alpaca's splits, cash dividends, name changes and mergers, applied to the books that held the stock.
 
 - The practice, AI, options and ghost books get them on their own:
   - a split on its ex-date, before the session opens;
-  - a dividend on its payable date, on the shares held when the stock went ex (at the end of the day before).
+  - a dividend on its payable date, on the shares held when the stock went ex (at the end of the day before);
+  - a name change or a merger on the day it takes effect, before the session opens, on the shares held then.
 - The real book waits for the owner. Each action is listed, and goes into the ledger only once the owner confirms the
-  broker shows it; a dividend is booked with the amount the broker paid. "Not in my account" dismisses it.
+  broker shows it; a dividend or a merger's cash is booked with the amount the broker paid. "Not in my account"
+  dismisses it.
 
-In the ledger a split is a trade with side "split" (quantity = the ratio's new count, fill = its old count), and a
-dividend is a trade with side "dividend" (quantity 1, fill = the cash paid); see migration 0011 and ledger.settle.
+In the ledger (migrations 0011 and 0014, ledger.settle):
+- a split is a trade with side "split" (quantity = the ratio's new count, fill = its old count);
+- a dividend is a trade with side "dividend" (quantity 1, fill = the cash paid);
+- a name change or a stock merger is a "convert_out" on the old ticker and a "convert_in" on the new one: the lots move
+  across at the same total cost, a name change 1 for 1, a stock merger old_rate shares into new_rate;
+- a cash merger is a "cash_out" on the old ticker (quantity = the shares, fill = the cash for all of them): it closes
+  the lots, so the gain or loss is realized;
+- a stock-and-cash merger is both: the shares convert with their whole cost, and the cash is a "cash_in", realized
+  with no cost. That keeps the arithmetic simple and the total gain right: the cost stays with the new shares, so the
+  gain shows up partly now (the cash) and the rest when they are sold.
 """
 from __future__ import annotations
 
@@ -24,6 +34,9 @@ from ghostline.market.calendar import NEW_YORK
 EX_TIME = dt.time(4, 0)          # a split's place in the ledger: its ex-date, before any trade of the session
 PAID_TIME = dt.time(9, 30)       # a dividend's cash: its payable date, at the open
 
+CASH_KINDS = ("cash_dividend", "cash_merger", "stock_and_cash_merger")     # the owner may correct the amount
+CONVERTS = ("name_change", "stock_merger", "stock_and_cash_merger")         # shares move to another ticker
+
 
 def held(db: Database, book_id: int, ticker: str, before: dt.datetime) -> Decimal:
     """Shares of a stock a book held just before a moment."""
@@ -38,18 +51,72 @@ def _n(d: Decimal) -> str:
     return format(d.normalize(), "f")
 
 
+def received(a: dict, shares: Decimal) -> Decimal:
+    """New shares for the shares held: a name change 1 for 1, a merger old_rate shares into new_rate."""
+    if a["kind"] == "name_change":
+        return shares
+    return (shares * a["new_rate"] / a["old_rate"]).quantize(Decimal("0.000001"))
+
+
+def ready(a: dict) -> bool:
+    """The action carries what applying it needs."""
+    kind = a["kind"]
+    if kind in ("forward_split", "reverse_split"):
+        return bool(a["new_rate"] and a["old_rate"])
+    if kind == "cash_dividend":
+        return bool(a["rate"])
+    if kind == "cash_merger":
+        return bool(a["rate"])
+    if kind == "name_change":
+        return bool(a.get("new_ticker"))
+    stock = bool(a.get("new_ticker") and a["new_rate"] and a["old_rate"])
+    return stock and bool(a["rate"]) if kind == "stock_and_cash_merger" else stock
+
+
 def describe(a: dict, shares: Decimal, amount: Decimal | None) -> str:
-    if a["kind"] == "cash_dividend":
-        return (f"{a['ticker']} dividend: {ledger.money(amount or 0)} "
+    kind, old, new = a["kind"], a["ticker"], a.get("new_ticker")
+    if kind == "cash_dividend":
+        return (f"{old} dividend: {ledger.money(amount or 0)} "
                 f"({_n(a['rate'])} a share on {_n(shares)})")
+    if kind == "name_change":
+        return f"{old} is now {new}: {_n(shares)} shares move to {new} at the same cost"
+    if kind == "stock_merger":
+        return f"{old} merged into {new}: {_n(shares)} shares become {_n(received(a, shares))} {new} at the same cost"
+    if kind == "cash_merger":
+        return f"{old} bought out for cash: {_n(shares)} shares at {_n(a['rate'])} = {ledger.money(amount or 0)}"
+    if kind == "stock_and_cash_merger":
+        return (f"{old} merged into {new}: {_n(shares)} shares become {_n(received(a, shares))} {new} "
+                f"plus {ledger.money(amount or 0)} cash")
     after = _n(shares * a["new_rate"] / a["old_rate"])
     return (f"{a['ticker']} {_n(a['new_rate'])}-for-{_n(a['old_rate'])} split: "
             f"{_n(shares)} shares become {after}")
 
 
+def _insert(conn: Any, a: dict, book_id: int, ticker: str, side: str, quantity: Decimal, fill: Decimal,
+            at: dt.datetime, text: str, related: str | None = None) -> int:
+    row = conn.execute("INSERT INTO trades (book_id, ticker, asset, side, quantity, fill, at, fees, broker, note, "
+                       "related_ticker) VALUES (%s, %s, 'stock', %s, %s, %s, %s, 0, 'corporate action', %s, %s) "
+                       "RETURNING id",
+                       (book_id, ticker, side, quantity, fill, at, f"{text} · Alpaca action {a['id']}",
+                        related)).fetchone()
+    return row["id"]
+
+
 def _book(conn: Any, a: dict, book_id: int, shares: Decimal, amount: Decimal | None) -> int:
-    """The action's trade in one book."""
-    if a["kind"] == "cash_dividend":
+    """The action's trades in one book; returns the first (the one corporate_action_books points at)."""
+    kind = a["kind"]
+    if kind in CONVERTS or kind == "cash_merger":
+        at = dt.datetime.combine(a["ex_date"], EX_TIME, tzinfo=NEW_YORK)
+        text = describe(a, shares, amount)
+        if kind == "cash_merger":
+            return _insert(conn, a, book_id, a["ticker"], "cash_out", shares, ledger.money(amount or 0), at, text)
+        first = _insert(conn, a, book_id, a["ticker"], "convert_out", shares, Decimal(0), at, text, a["new_ticker"])
+        _insert(conn, a, book_id, a["new_ticker"], "convert_in", received(a, shares), Decimal(0), at, text,
+                a["ticker"])
+        if kind == "stock_and_cash_merger":
+            _insert(conn, a, book_id, a["ticker"], "cash_in", shares, ledger.money(amount or 0), at, text)
+        return first
+    if kind == "cash_dividend":
         at = dt.datetime.combine(a["payable_date"], PAID_TIME, tzinfo=NEW_YORK)
         side, quantity, fill = "dividend", Decimal(1), ledger.money(amount or 0)
     else:
@@ -73,7 +140,7 @@ def apply(db: Database, today: dt.date | None = None) -> dict[str, int]:
         if dividend and (a["payable_date"] is None or a["payable_date"] > today or not a["rate"]):
             out["waiting"] += 1
             continue
-        if not dividend and not (a["new_rate"] and a["old_rate"]):
+        if not ready(a):
             continue
         ex_open = dt.datetime.combine(a["ex_date"], EX_TIME, tzinfo=NEW_YORK)
         done = {r["book_id"] for r in db.fetch_all(
@@ -84,7 +151,7 @@ def apply(db: Database, today: dt.date | None = None) -> dict[str, int]:
             shares = held(db, b["id"], a["ticker"], ex_open)
             if shares <= 0:
                 continue
-            amount = ledger.money(shares * a["rate"]) if dividend else None
+            amount = ledger.money(shares * a["rate"]) if a["kind"] in CASH_KINDS else None
             with db.connection() as conn:
                 if b["kind"] == "real":
                     conn.execute("INSERT INTO corporate_action_books (action_id, book_id, status, shares, amount) "
@@ -110,13 +177,14 @@ def pending(db: Database) -> list[dict[str, Any]]:
              "shares": _n(r["shares"]), "amount": str(r["amount"]) if r["amount"] is not None else None,
              "new_rate": _n(r["new_rate"]) if r["new_rate"] else None,
              "old_rate": _n(r["old_rate"]) if r["old_rate"] else None,
+             "new_ticker": r.get("new_ticker"),
              "text": describe(r, r["shares"], r["amount"])} for r in rows]
 
 
 def decide(db: Database, action_id: str, confirm: bool, amount: Decimal | None = None) -> dict[str, Any]:
-    """The owner's answer for the real book: confirm (a dividend with the amount the broker paid, when given) writes
-    the action into the ledger; dismiss records that the broker does not show it. Raises LookupError when nothing
-    waits under that id."""
+    """The owner's answer for the real book: confirm (a dividend or a merger's cash with the amount the broker paid,
+    when given) writes the action into the ledger; dismiss records that the broker does not show it. Raises
+    LookupError when nothing waits under that id."""
     row = db.fetch_one(
         "SELECT a.*, c.book_id, c.shares, c.amount FROM corporate_action_books c "
         "JOIN corporate_actions a ON a.id = c.action_id JOIN books b ON b.id = c.book_id "
@@ -125,7 +193,7 @@ def decide(db: Database, action_id: str, confirm: bool, amount: Decimal | None =
         raise LookupError(action_id)
     with db.connection() as conn:
         if confirm:
-            paid = ledger.money(amount) if amount is not None and row["kind"] == "cash_dividend" else row["amount"]
+            paid = ledger.money(amount) if amount is not None and row["kind"] in CASH_KINDS else row["amount"]
             trade_id = _book(conn, row, row["book_id"], row["shares"], paid)
             conn.execute("UPDATE corporate_action_books SET status = 'confirmed', amount = %s, trade_id = %s, "
                          "decided_at = now() WHERE action_id = %s AND book_id = %s",

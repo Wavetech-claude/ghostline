@@ -1,7 +1,7 @@
 import GhostlineKit
 import SwiftUI
 
-/// On Today: the real book's splits and dividends waiting for the owner. The practice, AI and options books took them
+/// On Today: the real book's splits, dividends, ticker changes and mergers waiting for the owner. The practice, AI and options books took them
 /// on their own; the real book takes one only when the owner confirms the broker shows it.
 struct PendingActionsCard: View {
     @Environment(SessionModel.self) private var session
@@ -43,7 +43,7 @@ struct PendingActionsCard: View {
                 Button("Not in My Account") { Task { await dismiss(a) } }.buttonStyle(.bordered)
             }
             .controlSize(.small)
-            if a.isDividend {
+            if a.paysCash {
                 Button("My broker paid a different amount") {
                     paid = a.amount ?? ""
                     editing = a

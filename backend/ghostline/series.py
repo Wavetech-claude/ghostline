@@ -91,6 +91,15 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
         for t in pending_trades:
             if t["side"] == "split":            # already counted in every earlier trade (later_splits); no cash
                 continue
+            if t["asset"] == "stock" and t["side"] in ("convert_out", "convert_in", "cash_out"):   # 0014
+                factor = later_splits(t["ticker"], t["at"])
+                held[t["ticker"]] += Decimal(t["quantity"]) * factor * (1 if t["side"] == "convert_in" else -1)
+                if t["side"] == "cash_out":      # its fill is the cash for all its shares
+                    cash += Decimal(t["fill"]) - Decimal(t["fees"] or 0)
+                continue
+            if t["side"] == "cash_in":           # a merger's cash part
+                cash += Decimal(t["fill"]) - Decimal(t["fees"] or 0)
+                continue
             m = Decimal(100) if t["asset"] == "option" else Decimal(1)
             amount = Decimal(t["quantity"]) * Decimal(t["fill"]) * m
             fees = Decimal(t["fees"] or 0)

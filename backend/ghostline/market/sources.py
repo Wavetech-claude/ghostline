@@ -47,7 +47,39 @@ UA = "Ghostline/0.2 (personal research tool; contact: owner)"
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
 ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
 ACTION_KINDS = (("forward_split", "forward_splits"), ("reverse_split", "reverse_splits"),
-                ("cash_dividend", "cash_dividends"))
+                ("cash_dividend", "cash_dividends"), ("name_change", "name_changes"), ("stock_merger", "stock_mergers"),
+                ("cash_merger", "cash_mergers"), ("stock_and_cash_merger", "stock_and_cash_mergers"))
+
+
+def _corporate_action(kind: str, a: dict) -> CorporateAction | None:
+    """One of Alpaca's actions, or None when it lacks what applying it needs. Field names read live 2026-11-01: splits
+    and dividends carry symbol / ex_date; a name change old_symbol / new_symbol / process_date; a merger
+    acquiree_symbol / acquirer_symbol / effective_date with acquiree_rate and acquirer_rate (stock), rate (cash) or
+    cash_rate (stock and cash). The holder's side is the old symbol: Alpaca's symbols filter also returns actions where
+    a tracked ticker is the acquirer, and those change nothing for a holder of the acquirer."""
+    if not a.get("id"):
+        return None
+    if kind == "name_change":
+        old, new, day = a.get("old_symbol"), a.get("new_symbol"), _date(a.get("process_date"))
+        if not (old and new and day) or old == new:
+            return None
+        return CorporateAction(str(a["id"]), kind, str(old).upper(), day, None, None, Decimal(1), Decimal(1), None,
+                               str(new).upper())
+    if kind.endswith("_merger"):
+        old, day = a.get("acquiree_symbol"), _date(a.get("effective_date") or a.get("process_date"))
+        if not (old and day):
+            return None
+        new = a.get("acquirer_symbol")
+        cash = a.get("rate") if kind == "cash_merger" else a.get("cash_rate")
+        return CorporateAction(str(a["id"]), kind, str(old).upper(), day, None, _date(a.get("payable_date")),
+                               dec(a.get("acquiree_rate")), dec(a.get("acquirer_rate")), dec(cash),
+                               str(new).upper() if new else None)
+    ex = _date(a.get("ex_date"))
+    if not (ex and a.get("symbol")):
+        return None
+    return CorporateAction(str(a["id"]), kind, str(a["symbol"]).upper(), ex, _date(a.get("record_date")),
+                           _date(a.get("payable_date")), dec(a.get("old_rate")), dec(a.get("new_rate")),
+                           dec(a.get("rate")))
 MAX_PAGES = 20
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -156,8 +188,8 @@ class Alpaca(Source):
         return out
 
     def corporate_actions(self, tickers: list[str], start: dt.date, end: dt.date) -> list[CorporateAction]:
-        """Splits and cash dividends for the tickers with an ex-date from start to end, every page (at most 20).
-        Read live 2026-10-30: NVDA's 10-for-1 split of 2024-06-10 came back as new_rate 10, old_rate 1."""
+        """Splits, cash dividends, name changes and mergers for the tickers, dated from start to end, every page (at
+        most 20). Read live 2026-10-30: NVDA's 10-for-1 split of 2024-06-10 came back as new_rate 10, old_rate 1."""
         out: list[CorporateAction] = []
         token = None
         for _ in range(MAX_PAGES):
@@ -169,11 +201,9 @@ class Alpaca(Source):
             groups = j.get("corporate_actions") or {}
             for kind, key in ACTION_KINDS:
                 for a in groups.get(key) or []:
-                    ex = _date(a.get("ex_date"))
-                    if ex and a.get("id") and a.get("symbol"):
-                        out.append(CorporateAction(str(a["id"]), kind, str(a["symbol"]).upper(), ex,
-                                                   _date(a.get("record_date")), _date(a.get("payable_date")),
-                                                   dec(a.get("old_rate")), dec(a.get("new_rate")), dec(a.get("rate"))))
+                    action = _corporate_action(kind, a)
+                    if action:
+                        out.append(action)
             token = j.get("next_page_token")
             if not token:
                 break

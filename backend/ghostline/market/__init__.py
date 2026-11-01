@@ -24,14 +24,16 @@ class SourceError(Exception):
 @dataclass(frozen=True)
 class CorporateAction:
     id: str
-    kind: str                       # forward_split | reverse_split | cash_dividend
+    kind: str                       # forward_split | reverse_split | cash_dividend | name_change | stock_merger |
+                                    # cash_merger | stock_and_cash_merger
     ticker: str
     ex_date: dt.date
     record_date: dt.date | None
     payable_date: dt.date | None
     old_rate: Decimal | None        # splits: old and new counts
     new_rate: Decimal | None
-    rate: Decimal | None            # a cash dividend, per share
+    rate: Decimal | None            # a cash dividend or a merger's cash, per share
+    new_ticker: str | None = None   # a name change's new symbol, a stock merger's acquirer
 
 
 @dataclass(frozen=True)
