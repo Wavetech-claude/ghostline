@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ghostline import edge
 from ghostline.auth import OwnerSub
 from ghostline.ideas import Scan
 
@@ -61,7 +62,12 @@ def ideas(
         + (" WHERE " + " AND ".join(where) if where else "")
         + " ORDER BY i.status = 'open' DESC, s.score DESC, i.id DESC LIMIT %s"
     )
-    rows = db.fetch_all(sql, (*params, limit))
+    rows = db.fetch_all(sql, (*params, limit * 2))
+    # your edge (reconciliation part 4): open ideas by score × how often the owner acts on that module and lane
+    fit = edge.fit_factors(db)
+    rows.sort(key=lambda r: (r["status"] != "open",
+                             -float(r["score"] or 0) * float(fit.get((r["module"], r["lane"]), 1)), -r["id"]))
+    rows = rows[:limit]
     counts = db.fetch_all(
         "SELECT lane, status, count(*) AS n FROM ideas WHERE expires_at > now() GROUP BY lane, status"
     )
