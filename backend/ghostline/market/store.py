@@ -34,15 +34,18 @@ def save_quotes(db: Database, quotes: list[Quote], source: str, as_of: dt.dateti
 
 
 def save_news(db: Database, items: list[NewsItem], source: str, as_of: dt.datetime) -> int:
-    n = 0
+    """A page of news (up to 100 items per name) in one statement: one round trip instead of one per item."""
+    if not items:
+        return 0
+    rows = ", ".join(
+        f"({'NULL' if i.ticker is None else repr(i.ticker)}, '{i.headline}', '{i.url}', "
+        f"'{i.published_at.isoformat()}', '{source}', '{as_of.isoformat()}', {'NULL' if i.tone is None else i.tone})"
+        for i in items)
     with db.connection() as conn:
-        for i in items:
-            cur = conn.execute("INSERT INTO news (ticker, headline, url, published_at, source, as_of, tone) "
-                               "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ticker, url) DO NOTHING",
-                               (i.ticker, i.headline, i.url, i.published_at, source, as_of, i.tone))
-            n += cur.rowcount
+        cur = conn.execute(f"INSERT INTO news (ticker, headline, url, published_at, source, as_of, tone) VALUES {rows} "
+                           "ON CONFLICT (ticker, url) DO NOTHING")
         conn.commit()
-    return n
+    return cur.rowcount
 
 
 def save_earnings(db: Database, rows: list[Earning], source: str, as_of: dt.datetime) -> int:
