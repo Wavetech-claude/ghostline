@@ -26,6 +26,9 @@ struct MainView: View {
                     Tab("Account", systemImage: "person.crop.circle") {
                         NavigationStack { AccountView() }
                     }
+                    Tab(role: .search) {
+                        NavigationStack { SearchView() }
+                    }
         }
         .tabViewStyle(.sidebarAdaptable)
         .sheet(isPresented: $ledger.showingTradeForm) { TradeFormView() }

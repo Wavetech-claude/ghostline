@@ -157,6 +157,12 @@ public extension APIClient {
         try await get("/news-earnings", query: [URLQueryItem(name: "ticker", value: ticker)], authenticated: true)
     }
 
+    /// Stocks by ticker or company name, the exact ticker first (GET /market/search).
+    func searchTickers(_ query: String) async throws -> [TickerMatch] {
+        try await (get("/market/search", query: [URLQueryItem(name: "q", value: query)], authenticated: true)
+                   as TickerMatches).results
+    }
+
     func watchlist() async throws -> [WatchRow] {
         struct Answer: Decodable { let watchlist: [WatchRow] }
         return try await (get("/watchlist", authenticated: true) as Answer).watchlist
@@ -179,3 +185,16 @@ public extension APIClient {
         try await get("/market/status", authenticated: true)
     }
 }
+
+/// One search result: a listed stock, and whether the owner watches it.
+public struct TickerMatch: Codable, Sendable, Equatable, Identifiable {
+    public let ticker: String
+    public let name: String
+    public let watched: Bool
+    public var id: String { ticker }
+}
+
+public struct TickerMatches: Codable, Sendable, Equatable {
+    public let results: [TickerMatch]
+}
+

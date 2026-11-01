@@ -3,6 +3,7 @@ they last answered). Every price carries its source and time."""
 from __future__ import annotations
 
 import datetime as dt
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -13,11 +14,32 @@ from ghostline import indicators
 from ghostline.auth import OwnerSub
 from ghostline.market import store
 from ghostline.market.calendar import Calendar
+from ghostline.market.jobs import Jobs
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import configured
 
 router = APIRouter()
 TIMEFRAMES = {"1D": 2, "1W": 8, "1M": 32, "3M": 95, "6M": 190, "1Y": 370, "5Y": 1830}
+SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+FRESH_DAYS = 4   # a weekend and a holiday: older than this, a chart the owner opens is fetched again
+
+
+def _stale(bars: list[dict]) -> bool:
+    return not bars or bars[-1]["ts"].date() < dt.date.today() - dt.timedelta(days=FRESH_DAYS)
+
+
+def _fetch_on_demand(request: Request, ticker: str) -> None:
+    """A stock the owner opened that no daily pull covers (searched, not watched): fetched now, in production only.
+    Staging pulls nothing (the owner's rule, 2026-10-30); its data is production's nightly copy."""
+    settings = request.app.state.settings
+    if settings.is_production and SYMBOL.match(ticker):
+        Jobs(request.app.state.db).bars_for(ticker)
+
+
+@router.get("/market/search")
+def search(request: Request, q: str = Query(min_length=1, max_length=40), sub: str = OwnerSub) -> dict:
+    rows = store.search_tickers(request.app.state.db, q)
+    return {"results": [{"ticker": r["ticker"], "name": r["name"], "watched": bool(r["watched"])} for r in rows]}
 
 
 @router.get("/charts")
@@ -28,6 +50,9 @@ def charts(request: Request, ticker: str, timeframe: str = Query(default="6M"), 
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=TIMEFRAMES[timeframe])
     # indicators need history before the window: read the whole stored series, compute, then cut
     all_bars = store.bars(db, ticker.upper(), "1D")
+    if _stale(all_bars):
+        _fetch_on_demand(request, ticker.upper())
+        all_bars = store.bars(db, ticker.upper(), "1D")
     ind = indicators.chart_payload(all_bars)
     keep = [i for i, b in enumerate(all_bars) if b["ts"] >= since]
     cut = (lambda xs: [xs[i] for i in keep]) if keep else (lambda xs: [])

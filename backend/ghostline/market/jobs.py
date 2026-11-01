@@ -60,6 +60,18 @@ class Jobs:
                 out["tickers"] += 1
         return out
 
+    def bars_for(self, ticker: str, days: int = 1830) -> int:
+        """Five years of daily bars for one ticker, now (a stock the owner opened that no pull covers yet)."""
+        end = dt.date.today()
+        bars = self._call("alpaca", "bars", self.sources["alpaca"].bars, ticker, end - dt.timedelta(days=days), end,
+                          wait=False)
+        return store.save_bars(self.db, ticker, "1D", bars, "alpaca", utcnow()) if bars else 0
+
+    def pull_tickers(self) -> dict:
+        """The ticker directory from the SEC's company list (one request, no key), for search and EDGAR's facts."""
+        rows = self._call("edgar", "company_tickers", self.sources["edgar"].directory)
+        return {"tickers": store.save_tickers(self.db, rows, "sec", utcnow()) if rows else 0}
+
     def pull_quotes(self) -> dict:
         """Latest quotes: Tradier for the owner's account when configured, else Alpaca's IEX quotes."""
         tickers = store.tracked_tickers(self.db)

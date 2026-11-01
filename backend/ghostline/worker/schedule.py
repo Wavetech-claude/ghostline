@@ -30,7 +30,8 @@ from ghostline.practice import Practice
 
 PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
-PULLS = ("pull_calendar", "pull_macro", "pull_tone", "build_universe", "pull_bars", "pull_corporate_actions",
+PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "build_universe", "pull_bars",
+         "pull_corporate_actions",
          "pull_news_earnings", "pull_fundamentals", "pull_chains", "pull_quotes")
 
 
@@ -99,6 +100,7 @@ def register(
     plan = [
         ("pull_calendar", j.pull_calendar, CronTrigger(hour=4, minute=50, timezone=PT)),
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
+        ("pull_tickers", j.pull_tickers, CronTrigger(hour=4, minute=40, timezone=PT)),
         ("pull_tone", j.pull_tone, CronTrigger(hour="0-4", minute="0,30", timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),

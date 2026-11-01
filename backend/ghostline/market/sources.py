@@ -268,6 +268,15 @@ class Edgar(Source):
     base_url = "https://data.sec.gov"
     needs_key = False
 
+    def directory(self) -> list[tuple[str, str, str]]:
+        """Every listed company the SEC knows: (ticker, name, CIK with 10 digits), in the file's order."""
+        out = []
+        for row in self.fetch("https://www.sec.gov/files/company_tickers.json").values():
+            ticker, name = str(row.get("ticker") or "").upper(), str(row.get("title") or "").strip()
+            if ticker and name and row.get("cik_str") is not None:
+                out.append((ticker, name, f"{int(row['cik_str']):010d}"))
+        return out
+
     def cik(self, ticker: str) -> str | None:
         for row in self.fetch("https://www.sec.gov/files/company_tickers.json").values():
             if str(row.get("ticker", "")).upper() == ticker.upper():
