@@ -27,6 +27,9 @@ not investment advice, and it never places a real trade.
 `/health` answers 200 only when the database answers and every migration is applied, and names the running
 `version` and `commit`.
 
+Staging builds `main`. Production builds the `release` branch, which only the release tap moves (to the tagged
+commit, before production deploys); a merge into `main` never reaches production on its own.
+
 ## The ship rule
 
 1. Branch from `main`, write the test first, make it pass, run the whole suite, raise `VERSION` and write the
@@ -35,7 +38,7 @@ not investment advice, and it never places a real trade.
    serious. A title starting with `WIP:`, a draft, or the label `hold` keeps it out.
 3. After the merge, staging is deployed and verified by the pipeline. A merge that raised `VERSION` then offers a
    release; **production is the owner's one tap**, never a session's.
-4. Never merge, deploy, tag or push to `main` yourself. Pull requests from forks are never merged.
+4. Never merge, deploy, tag or push to `main` or `release` yourself. Pull requests from forks are never merged.
 
 ## Rules
 

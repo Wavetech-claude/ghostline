@@ -21,3 +21,6 @@ apple/build/
 .DS_Store
 Thumbs.db
 build/
+
+# The owner's local context for coding sessions (never committed: the repository is public)
+.homelab/
