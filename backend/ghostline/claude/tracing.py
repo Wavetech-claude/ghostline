@@ -66,11 +66,14 @@ class Tracer:
             "metadata": {"cost_usd": cost_usd},
         }
         if usage:
-            body["usage"] = {
-                "input": usage.get("input_tokens"),
-                "output": usage.get("output_tokens"),
-                "total": (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0),
-            }
+            prompt_tokens = prompt_input_tokens(usage)
+            output_tokens = usage.get("output_tokens") or 0
+            body["usage"] = {"input": prompt_tokens, "output": output_tokens, "total": prompt_tokens + output_tokens}
+            body["metadata"].update({
+                "input_uncached": usage.get("input_tokens") or 0,
+                "input_cache_read": usage.get("cache_read_input_tokens") or 0,
+                "input_cache_write": usage.get("cache_creation_input_tokens") or 0,
+            })
         self._send([{"id": str(uuid.uuid4()), "type": "generation-create", "timestamp": _now(), "body": body}])
 
     def _send(self, batch: list[dict]) -> None:
@@ -85,6 +88,14 @@ class Tracer:
                 client.close()
         except Exception as exc:  # noqa: BLE001 — tracing never stops a job
             logger.warning("langfuse send failed: %s: %s", type(exc).__name__, exc)
+
+
+def prompt_input_tokens(usage: dict[str, Any]) -> int:
+    """Every prompt token Claude read. The CLI's `input_tokens` counts only the part after the last cache breakpoint:
+    the cached part is in `cache_read_input_tokens` and `cache_creation_input_tokens`. Sending `input_tokens` alone made
+    Langfuse show 2 input tokens for a whole brief (found 2026-11-01)."""
+    keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    return sum(int(usage.get(k) or 0) for k in keys)
 
 
 def _now() -> str:
