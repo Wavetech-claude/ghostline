@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     worker_token: str = Field(default="", alias="GHOSTLINE_WORKER_TOKEN")
     test_signer_key: str = Field(default="", alias="GHOSTLINE_TEST_SIGNER_KEY")
     api_internal_url: str = Field(default="", alias="GHOSTLINE_API_INTERNAL_URL")
+    # Proof run E6b of the delivery pipeline (0.17.3 only, removed in 0.17.4): without this setting /health turns
+    # unhealthy `e6b_after_s` seconds after start. Staging and CI have it; production does not, so production starts
+    # healthy (Coolify switches to it), then fails, and the rollback watch must roll it back.
+    e6b_canary: str = Field(default="", alias="GHOSTLINE_E6B_CANARY")
+    e6b_after_s: int = Field(default=180, alias="GHOSTLINE_E6B_AFTER_S")
 
     minio_endpoint: str = Field(default="", alias="MINIO_ENDPOINT")
     minio_bucket: str = Field(default="", alias="MINIO_BUCKET")

@@ -2,6 +2,13 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.17.3] — unreleased
+
+- Proof run E6b of the delivery pipeline: a release that starts healthy and breaks a few minutes later, with no
+  database change. `/health` turns unhealthy three minutes after start unless the setting `GHOSTLINE_E6B_CANARY` is
+  present; staging has it, production does not. Production starts healthy, then fails, and the rollback watch is
+  expected to put 0.17.2 back by itself, with an issue and a message. 0.17.4 removes it. Nothing in the app changes.
+
 ## [0.17.2] — unreleased
 
 - Proof run E6 is over: `/health` no longer needs `GHOSTLINE_E6_CANARY`, and production is healthy on the current code

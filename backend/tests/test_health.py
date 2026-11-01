@@ -79,3 +79,14 @@ def test_docs_are_off():
     with TestClient(app) as c:
         assert c.get("/docs").status_code == 404 and c.get("/openapi.json").status_code == 404
     assert os.environ.get("ANTHROPIC_API_KEY") is None or True
+
+
+def test_health_turns_503_after_the_e6b_delay_without_the_setting():
+    """Proof run E6b (0.17.3 only): production lacks the setting, so its health passes at start (Coolify switches to it)
+    and fails once the delay has passed, and the rollback watch must roll it back."""
+    with TestClient(create_app(settings(GHOSTLINE_E6B_CANARY="", GHOSTLINE_E6B_AFTER_S="0"))) as c:
+        r = c.get("/health")
+    assert r.status_code == 503 and r.json()["reason"] == "setting GHOSTLINE_E6B_CANARY missing (proof run E6b)"
+    with TestClient(create_app(settings(GHOSTLINE_E6B_CANARY=""))) as c:   # within the delay: still healthy
+        assert c.get("/health").status_code == 200
+
