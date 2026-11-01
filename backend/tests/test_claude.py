@@ -247,6 +247,22 @@ def test_tracing_is_silent_without_keys_and_posts_a_batch_with_them():
     assert sent[1]["batch"][0]["body"]["usage"] == {"input": 3, "output": 2, "total": 5}
 
 
+def test_tracing_counts_cached_prompt_tokens_as_input():
+    # The CLI's real shape: nearly all of a prompt is cached, so input_tokens alone is 2 (production, 2026-11-01).
+    import httpx
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(207, json={"successes": [], "errors": []})
+    t = Tracer("https://langfuse.test", "pk", "sk", "test", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    usage = {"input_tokens": 2, "cache_creation_input_tokens": 1500, "cache_read_input_tokens": 9000, "output_tokens": 220}
+    t.generation("tid", "eval", "claude-sonnet-5-5", "p", "o", usage, 900, 0.03)
+    body = sent[0]["batch"][0]["body"]
+    assert body["usage"] == {"input": 10502, "output": 220, "total": 10722}
+    assert body["metadata"] == {"cost_usd": 0.03, "input_uncached": 2, "input_cache_read": 9000, "input_cache_write": 1500}
+
+
 def test_prompts_render_with_the_rules():
     p = prompts.load("analyst", role="technical", lens="trend", ticker="AAPL", facts="{}")
     assert "Use only the numbers in FACTS" in p and "technical analyst" in p

@@ -2,6 +2,12 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.22.2] — unreleased
+
+- Langfuse shows the real number of prompt tokens for each Claude call. It showed only the uncached tail (2 tokens for a
+  whole brief), because the cached part of a prompt is counted separately; the cached and uncached parts are now added
+  together, and the split is kept in each call's metadata. No change to the app.
+
 ## [0.22.1] — unreleased
 
 - TestFlight works again. Every release from v0.18.0 to v0.22.0 failed to sign: the build machine starts with no
