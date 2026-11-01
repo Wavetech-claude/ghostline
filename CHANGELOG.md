@@ -2,6 +2,12 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.22.1] — unreleased
+
+- TestFlight works again. Every release from v0.18.0 to v0.22.0 failed to sign: the build machine starts with no
+  certificate, so Xcode made a new one on each run, and twenty of them had filled Apple's limit. The build machine now
+  signs with one stored certificate, and a run fails if Xcode makes another. No change to the app itself.
+
 ## [0.22.0] — unreleased
 
 - Your edge (reconciliation part 4): the app learns from what you do with its suggestions. Learning shows, per module and
