@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     worker_token: str = Field(default="", alias="GHOSTLINE_WORKER_TOKEN")
     test_signer_key: str = Field(default="", alias="GHOSTLINE_TEST_SIGNER_KEY")
     api_internal_url: str = Field(default="", alias="GHOSTLINE_API_INTERNAL_URL")
+    # Proof run E6 of the delivery pipeline (0.17.1 only, removed in 0.17.2): /health is unhealthy without this setting.
+    # Staging has it and production does not, so production goes unhealthy and must be rolled back automatically.
+    e6_canary: str = Field(default="", alias="GHOSTLINE_E6_CANARY")
 
     minio_endpoint: str = Field(default="", alias="MINIO_ENDPOINT")
     minio_bucket: str = Field(default="", alias="MINIO_BUCKET")

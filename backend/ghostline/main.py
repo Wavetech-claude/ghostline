@@ -95,6 +95,9 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
         if left:
             return JSONResponse({**body, "status": "unhealthy", "reason": f"migrations pending: {', '.join(left)}"},
                                 status_code=503)
+        if not settings.e6_canary:   # proof run E6 (0.17.1 only): see config.py
+            return JSONResponse({**body, "status": "unhealthy", "reason": "setting GHOSTLINE_E6_CANARY missing"},
+                                status_code=503)
         return body
 
     return app
