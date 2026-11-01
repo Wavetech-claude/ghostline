@@ -277,6 +277,40 @@ class Edgar(Source):
                 out.append((ticker, name, f"{int(row['cik_str']):010d}"))
         return out
 
+    def _concept(self, cik: str, tags: tuple[str, ...], unit: str) -> list[dict]:
+        """One XBRL concept's reported values, from the first tag the company files (a missing tag answers 404)."""
+        for tag in tags:
+            try:
+                j = self.get(f"/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json")
+            except SourceError:
+                continue
+            rows = (j.get("units") or {}).get(unit) or []
+            if rows:
+                return rows
+        return []
+
+    def eps_history(self, cik: str) -> tuple[list[tuple[dt.date, Decimal]],
+                                              list[tuple[dt.date, Decimal, Decimal | None]]]:
+        """Reported diluted EPS (basic when diluted is not filed): 3-month quarters and fiscal years, newest first, each
+        period's latest filing (a restatement wins); a year carries its revenue when it is filed."""
+        def periods(rows: list[dict], lo: int, hi: int) -> dict[dt.date, Decimal]:
+            out: dict[dt.date, tuple[str, Decimal]] = {}
+            for r in rows:
+                start, end = _date(r.get("start")), _date(r.get("end"))
+                if not (start and end and r.get("val") is not None and lo <= (end - start).days <= hi):
+                    continue
+                filed = str(r.get("filed") or "")
+                if end not in out or filed >= out[end][0]:
+                    out[end] = (filed, Decimal(str(r["val"])))
+            return {k: v for k, (_, v) in out.items()}
+
+        eps = self._concept(cik, ("EarningsPerShareDiluted", "EarningsPerShareBasic"), "USD/shares")
+        revenue_tags = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues")
+        revenue = periods(self._concept(cik, revenue_tags, "USD"), 350, 380)
+        quarters = sorted(periods(eps, 80, 100).items(), reverse=True)
+        years = [(end, v, revenue.get(end)) for end, v in sorted(periods(eps, 350, 380).items(), reverse=True)]
+        return quarters, years
+
     def cik(self, ticker: str) -> str | None:
         for row in self.fetch("https://www.sec.gov/files/company_tickers.json").values():
             if str(row.get("ticker", "")).upper() == ticker.upper():

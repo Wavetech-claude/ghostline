@@ -72,6 +72,25 @@ class Jobs:
         rows = self._call("edgar", "company_tickers", self.sources["edgar"].directory)
         return {"tickers": store.save_tickers(self.db, rows, "sec", utcnow()) if rows else 0}
 
+    def pull_eps_history(self, fresh_days: int = 7) -> dict:
+        """Reported EPS from EDGAR for every scanned stock with a CIK, at most once a week each (filings are
+        quarterly), so CANSLIM can judge stocks FMP's free plan does not cover."""
+        out = {"tickers": 0, "rows": 0, "fresh": 0}
+        now = utcnow()
+        for ticker in store.scan_tickers(self.db):
+            cik = store.cik_of(self.db, ticker)
+            if not cik:
+                continue
+            fetched = store.eps_fetched_at(self.db, ticker)
+            if fetched and now - fetched < dt.timedelta(days=fresh_days):
+                out["fresh"] += 1
+                continue
+            got = self._call("edgar", "companyconcept", self.sources["edgar"].eps_history, cik)
+            if got and (got[0] or got[1]):
+                out["rows"] += store.save_eps(self.db, ticker, got[0], got[1], "sec", now)
+                out["tickers"] += 1
+        return out
+
     def pull_quotes(self) -> dict:
         """Latest quotes: Tradier for the owner's account when configured, else Alpaca's IEX quotes."""
         tickers = store.tracked_tickers(self.db)

@@ -55,6 +55,25 @@ class Scan:
             "SELECT ticker, at, estimate, actual FROM earnings WHERE ticker = %s ORDER BY at", (ticker,)
         )
 
+    def canslim_inputs(self, ticker: str, earnings: list[dict],
+                       fundamentals: dict | None) -> tuple[list[dict], dict | None]:
+        """CANSLIM's C and A from EDGAR when FMP gave nothing for the stock (its free plan covers only what the owner
+        holds or watches): reported quarters as actual EPS on their period end, years as the annual statements. Only
+        CANSLIM reads these; PEAD and the earnings trade keep the report dates and estimates (2026-11-01)."""
+        edgar = store.eps_history(self.db, ticker)
+        if not edgar:
+            return earnings, fundamentals
+        if not any(e.get("actual") is not None for e in earnings):
+            quarters = [{"ticker": ticker, "at": dt.datetime.combine(r["period_end"], dt.time(), tzinfo=dt.UTC),
+                         "estimate": None, "actual": r["eps"], "source": r["source"]}
+                        for r in edgar if r["kind"] == "quarter"]
+            earnings = sorted([*earnings, *quarters], key=lambda e: e["at"])
+        if not (fundamentals or {}).get("income_annual"):
+            years = [{"date": r["period_end"].isoformat(), "eps": r["eps"], "revenue": r["revenue"],
+                      "source": r["source"]} for r in edgar if r["kind"] == "year"]
+            fundamentals = {**(fundamentals or {}), "income_annual": years}
+        return earnings, fundamentals
+
     def fundamentals(self, ticker: str) -> dict | None:
         row = self.db.fetch_one(
             "SELECT payload FROM fundamentals WHERE ticker = %s ORDER BY as_of DESC LIMIT 1", (ticker,)
@@ -99,7 +118,7 @@ class Scan:
             earnings = self.earnings(ticker)
             signals = [
                 vcp.signal(ticker, bars, spy),
-                canslim.signal(ticker, bars, spy, earnings, self.fundamentals(ticker)),
+                canslim.signal(ticker, bars, spy, *self.canslim_inputs(ticker, earnings, self.fundamentals(ticker))),
                 pead.signal(ticker, bars, earnings),
                 earnings_trade.signal(ticker, bars, earnings),
             ]

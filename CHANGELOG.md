@@ -2,6 +2,14 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.20.0] — unreleased
+
+- Long-term ideas can appear now. The long-term module (CANSLIM) needs a stock's earnings growth: the latest quarter
+  against a year earlier, and three years of annual earnings. It had them only for stocks you hold or watch (the free
+  data plan's limit), so 48 of the 50 stocks it scanned could never pass. Earnings history now comes from the SEC's
+  filings (free, no key) for every scanned stock, refreshed at most once a week each, and is used only when the paid
+  source has nothing. The swing modules keep their report dates and estimates.
+
 ## [0.19.0] — unreleased
 
 - Search any stock, the way Robinhood does: a Search tab finds a stock by ticker or company name (the exact ticker
