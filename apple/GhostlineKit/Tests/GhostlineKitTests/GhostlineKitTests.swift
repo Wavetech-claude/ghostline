@@ -154,4 +154,10 @@ func fakeClient(answers: [String: (Int, String)], tokens: TokenStore = InMemoryT
         let h = try await c.health()
         #expect(!h.isHealthy && h.reason == "migrations pending: x")
     }
+
+    @Test func searchResultsDecode() throws {
+        let json = #"{"results":[{"ticker":"NVDA","name":"NVIDIA CORP","watched":true},{"ticker":"NVDL","name":"GraniteShares 2x Long NVDA","watched":false}]}"#
+        let r = try GhostlineJSON.decoder().decode(TickerMatches.self, from: Data(json.utf8))
+        #expect(r.results.map(\.id) == ["NVDA", "NVDL"] && r.results[0].watched && !r.results[1].watched)
+    }
 }

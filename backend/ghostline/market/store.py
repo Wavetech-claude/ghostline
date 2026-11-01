@@ -241,3 +241,28 @@ def jsonable(row: dict) -> dict:
 
 def as_json(rows: list[dict]) -> list[dict[str, Any]]:
     return [jsonable(r) for r in rows]
+
+
+def save_tickers(db: Database, rows: list[tuple[str, str, str | None]], source: str, as_of: dt.datetime) -> int:
+    """The ticker directory, refreshed in place (one row per ticker)."""
+    with db.connection() as conn:
+        for ticker, name, cik in rows:
+            conn.execute("INSERT INTO tickers (ticker, name, cik, source, as_of) VALUES (%s, %s, %s, %s, %s) "
+                         "ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name, cik = EXCLUDED.cik, "
+                         "source = EXCLUDED.source, as_of = EXCLUDED.as_of", (ticker, name, cik, source, as_of))
+        conn.commit()
+    return len(rows)
+
+
+def search_tickers(db: Database, q: str, limit: int = 20) -> list[dict]:
+    """Stocks by ticker or company name: the exact ticker first, then ticker prefixes (shortest first), then names
+    that contain the words, each marked when the owner watches it."""
+    q = q.strip()
+    like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return db.fetch_all(
+        "SELECT t.ticker, t.name, (w.ticker IS NOT NULL) AS watched FROM tickers t "
+        "LEFT JOIN watchlist w ON w.ticker = t.ticker "
+        "WHERE t.ticker ILIKE %s OR t.name ILIKE %s "
+        "ORDER BY (t.ticker = upper(%s)) DESC, (t.ticker ILIKE %s) DESC, length(t.ticker), t.ticker LIMIT %s",
+        (like + "%", "%" + like + "%", q, like + "%", limit))
+

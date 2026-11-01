@@ -2,6 +2,15 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.19.0] — unreleased
+
+- Search any stock, the way Robinhood does: a Search tab finds a stock by ticker or company name (the exact ticker
+  first) and opens its stock page, watched or not; the page has its own Watch button. A ticker the list does not hold,
+  such as a fund like SPY, still opens.
+- The company list is the SEC's (free, no key), refreshed every morning in production; staging reads production's copy.
+- A stock nobody watches gets its chart on the spot: opening it fetches five years of daily prices once (production
+  only; staging never pulls).
+
 ## [0.18.0] — unreleased
 
 - An idea and a holding now open the stock page you know from the Watchlist (price chart with drag-to-read, news,
