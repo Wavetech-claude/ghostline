@@ -2,6 +2,13 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.17.1] — unreleased
+
+- Proof run E6 of the delivery pipeline: a release that breaks production's health, with no database change.
+  `/health` now needs the setting `GHOSTLINE_E6_CANARY`, which staging has and production does not. Staging verifies;
+  after the production tap, production is expected to turn unhealthy and the rollback watch to put 0.17.0 back by
+  itself, with an issue and a message. 0.17.2 removes the requirement. Nothing in the app changes.
+
 ## [0.17.0] — unreleased
 
 - Stock splits and cash dividends (corporate actions), from Alpaca every morning for your stocks.
