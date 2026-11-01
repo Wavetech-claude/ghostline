@@ -2,6 +2,11 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.17.2] — unreleased
+
+- Proof run E6 is over: `/health` no longer needs `GHOSTLINE_E6_CANARY`, and production is healthy on the current code
+  again. Nothing in the app changes.
+
 ## [0.17.1] — unreleased
 
 - Proof run E6 of the delivery pipeline: a release that breaks production's health, with no database change.

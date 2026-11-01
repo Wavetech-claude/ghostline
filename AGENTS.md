@@ -46,6 +46,9 @@ commit, before production deploys); a merge into `main` never reaches production
 - Synthetic identities only (`qa+<scenario>@example.com`); demonstration data only.
 - Money is `numeric`, quantities allow fractions, every market-data row carries `source` and `as_of`.
 - Standard GitHub runners only; a documentation-only change skips the heavy steps inside each job.
+- A new setting that `/health` or start-up needs must also be added to the CI step "Migrations on an empty
+  database, then health" in `.github/workflows/ci.yml`: that step builds its settings from the job environment, not
+  from the test suite's (2026-10-31: 0.17.1 failed that step).
 
 ## Run it locally
 
