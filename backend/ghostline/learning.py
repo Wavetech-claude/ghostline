@@ -283,12 +283,24 @@ def weekly_digest(db: Database, today: dt.date | None = None) -> dict[str, Any]:
             "",
             f"## Test set: {ev['correct']} of {ev['questions']} right ({ev['score_pct']}%), {ev['at']:%Y-%m-%d}",
         ]
+    from ghostline import edge  # reconciliation part 4: what the owner did with the suggestions
+    yours = edge.compute(db)
+    t = yours["totals"]
+    lines += ["", f"## Your edge: you took {t['took']} of {t['decided']} decided suggestions ({t['open']} still open)"]
+    lines += [
+        f"- {g['module']} ({g['lane']}): took {g['took']} of {g['decided']}"
+        + (f", real {g['real_pct_avg']}%" if g["real_pct_avg"] else "")
+        + (f", against its paper {g['gap_pct_avg']}%" if g["gap_pct_avg"] else "")
+        + (f", skipped ones {g['skipped_excess_avg']}% vs SPY" if g["skipped_excess_avg"] else "")
+        for g in yours["groups"] if g["decided"]
+    ]
     content = "\n".join(lines)
     facts = {
         "week_of": week_of.isoformat(),
         "settled": len(settled),
         "modules": [{k: str(v) if isinstance(v, Decimal) else v for k, v in m.items()} for m in modules],
         "lanes": [{k: str(v) if isinstance(v, Decimal) else v for k, v in lane.items()} for lane in lanes],
+        "your_edge": yours,
     }
     row = db.fetch_one(
         "INSERT INTO weekly_digests (week_of, content, facts) VALUES (%s, %s, %s::jsonb) "

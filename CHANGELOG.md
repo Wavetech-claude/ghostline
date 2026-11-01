@@ -2,6 +2,14 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.22.0] — unreleased
+
+- Your edge (reconciliation part 4): the app learns from what you do with its suggestions. Learning shows, per module and
+  lane, what you took, said no to or let lapse, your real result on what you took against that idea's own paper result,
+  and what the ideas you skipped did against the S&P 500. The weekly digest carries the same.
+- Open ideas you tend to act on rank a little higher (score × a factor from 0.75 to 1.25 that stays 1.00 until you
+  decide); nothing is hidden. Module weights and graduation still learn from paper results only.
+
 ## [0.21.0] — unreleased
 
 - Face ID lock (Touch ID on the Mac, your device passcode as the fallback). Ghostline asks when it opens and when you

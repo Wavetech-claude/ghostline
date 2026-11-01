@@ -110,3 +110,46 @@ public extension APIClient {
         _ = try await put("/learning/settings", body: Body(graduationN: n), authenticated: true) as [String: String]
     }
 }
+
+// Your edge (reconciliation part 4): what the owner does with the suggestions, per module and lane. Module weights keep
+// learning from paper results only; this reorders open ideas and is shown on Learning and in the weekly digest.
+
+public struct EdgeGroup: Codable, Sendable, Equatable, Identifiable {
+    public let module: String
+    public let lane: String
+    public let took: Int
+    public let declined: Int
+    public let lapsed: Int
+    public let open: Int
+    public let decided: Int
+    public let takeRate: String?
+    public let fit: String
+    public let realPctAvg: String?
+    public let realN: Int
+    public let gapPctAvg: String?
+    public let gapN: Int
+    public let skippedExcessAvg: String?
+    public let skippedN: Int
+    public var id: String { "\(module)-\(lane)" }
+}
+
+public struct EdgeTotals: Codable, Sendable, Equatable {
+    public let took: Int
+    public let declined: Int
+    public let lapsed: Int
+    public let open: Int
+    public let decided: Int
+}
+
+public struct YourEdge: Codable, Sendable, Equatable {
+    public let groups: [EdgeGroup]
+    public let totals: EdgeTotals
+    public let note: String
+}
+
+public extension APIClient {
+    func yourEdge() async throws -> YourEdge {
+        try await get("/edge", authenticated: true)
+    }
+}
+

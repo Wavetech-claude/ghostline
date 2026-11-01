@@ -7,6 +7,7 @@ struct JournalView: View {
     @Environment(SessionModel.self) private var session
     @State private var journal: Journal?
     @State private var lessons: [Lesson] = []
+    @State private var edge: YourEdge?
     @State private var error: String?
     @State private var busy = false
     @State private var graduationN = 30
@@ -53,6 +54,21 @@ struct JournalView: View {
                             }
                             .accessibilityElement(children: .combine)
                         }
+                    }
+                }
+                if let edge, edge.totals.decided > 0 || edge.totals.open > 0 {
+                    Section {
+                        ForEach(edge.groups.filter { $0.decided > 0 }) { g in edgeRow(g) }
+                        if edge.totals.decided == 0 {
+                            Text("Nothing decided yet: take, skip or let ideas lapse, and this fills in.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Your Edge")
+                    } footer: {
+                        Text("You took \(edge.totals.took) of \(edge.totals.decided) decided suggestions. "
+                             + "Ideas you tend to act on rank a little higher; module weights still learn from paper "
+                             + "results only.")
                     }
                 }
                 Section("Weekly Test Set") {
@@ -112,6 +128,23 @@ struct JournalView: View {
         .refreshable { await load() }
     }
 
+    private func edgeRow(_ g: EdgeGroup) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(g.module.replacingOccurrences(of: "_", with: " ")) · \(g.lane.capitalized)").font(.body)
+            Text("Took \(g.took) of \(g.decided) · said no \(g.declined) · lapsed \(g.lapsed)")
+                .font(.caption).foregroundStyle(.secondary)
+            if let real = g.realPctAvg {
+                Text("Your result \(pct(real))" + (g.gapPctAvg.map { " · against the idea \(pct($0))" } ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let skipped = g.skippedExcessAvg {
+                Text("What you skipped did \(pct(skipped)) against SPY")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func pct(_ s: String?) -> String {
         guard let s, let d = Decimal(string: s) else { return "—" }
         return "\(d > 0 ? "+" : "")\(d.formatted(.number.precision(.fractionLength(2))))%"
@@ -123,6 +156,7 @@ struct JournalView: View {
             journal = j
             graduationN = j.graduationN
             lessons = try await session.client.lessons()
+            edge = try? await session.client.yourEdge()
             error = nil
         } catch {
             self.error = (error as? GhostlineError)?.userMessage ?? error.localizedDescription

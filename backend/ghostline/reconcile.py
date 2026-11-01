@@ -66,9 +66,10 @@ def _realized_by_opening(rows: list[dict]) -> dict[int, Decimal]:
     return out
 
 
-def report(db: Database, month: str | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
-    now = now or dt.datetime.now(dt.UTC)
-    start, end, label = month_bounds(month)
+def decisions(db: Database) -> dict[str, Any]:
+    """What the owner did with each suggestion: real trades, realized P&L per opening trade, the opening trades taken
+    per idea and per memo, the trades a to-do closed, and every "no" with its reason (the monthly report and your edge,
+    edge.py, read the same facts)."""
     rows = _real_trades(db)
     realized = _realized_by_opening(rows)
     opens = [r for r in rows if r["side"] in OPENS]
@@ -91,6 +92,16 @@ def report(db: Database, month: str | None = None, now: dt.datetime | None = Non
         "SELECT kind, ref_id, reason FROM suggestion_decisions")}
     for t in db.fetch_all("SELECT DISTINCT idea_id FROM todos WHERE status = 'dropped' AND idea_id IS NOT NULL"):
         declined.setdefault(("idea", t["idea_id"]), "Dropped from To Place at Your Broker")
+    return {"rows": rows, "realized": realized, "opens": opens, "took_idea": took_idea, "took_memo": took_memo,
+            "via_todo": via_todo, "declined": declined}
+
+
+def report(db: Database, month: str | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
+    now = now or dt.datetime.now(dt.UTC)
+    start, end, label = month_bounds(month)
+    d = decisions(db)
+    realized, opens, took_idea, took_memo = d["realized"], d["opens"], d["took_idea"], d["took_memo"]
+    via_todo, declined = d["via_todo"], d["declined"]
 
     items: list[dict[str, Any]] = []
     for i in db.fetch_all(

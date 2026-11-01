@@ -30,4 +30,10 @@ import Testing
         #expect(p.pending.first?.isDividend == true && p.pending.first?.payableDate == "2024-06-28")
         #expect(p.pending.first?.amount == "0.50" && p.pending.first?.newRate == nil)
     }
+
+    @Test func yourEdgeDecodes() throws {
+        let json = #"{"groups":[{"module":"vcp","lane":"swing","took":1,"declined":1,"lapsed":0,"open":0,"decided":2,"take_rate":"0.50","fit":"1.0000","real_pct_avg":"8.00","real_n":1,"gap_pct_avg":"-2.00","gap_n":1,"skipped_excess_avg":"-5.00","skipped_n":1}],"totals":{"took":1,"declined":1,"lapsed":0,"open":0,"decided":2},"note":"Module weights learn from paper results only."}"#
+        let e = try GhostlineJSON.decoder().decode(YourEdge.self, from: Data(json.utf8))
+        #expect(e.groups.first?.id == "vcp-swing" && e.groups.first?.gapPctAvg == "-2.00" && e.totals.decided == 2)
+    }
 }

@@ -9,10 +9,16 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
-from ghostline import reconcile
+from ghostline import edge, reconcile
 from ghostline.auth import OwnerSub
 
 router = APIRouter()
+
+
+@router.get("/edge")
+def your_edge(request: Request, sub: str = OwnerSub) -> dict:
+    """What the owner does with the suggestions, per module and lane (reconciliation part 4)."""
+    return edge.compute(request.app.state.db)
 
 
 @router.get("/reconciliation")
