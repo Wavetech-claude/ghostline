@@ -2,6 +2,10 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.17.4] — unreleased
+
+- Proof run E6b is over: `/health` no longer turns unhealthy without `GHOSTLINE_E6B_CANARY`. Nothing in the app changes.
+
 ## [0.17.3] — unreleased
 
 - Proof run E6b of the delivery pipeline: a release that starts healthy and breaks a few minutes later, with no

@@ -30,7 +30,7 @@ def settings(**over) -> Settings:
             "GHOSTLINE_SESSION_SECRET": SESSION_SECRET,
             "GHOSTLINE_OWNER_APPLE_ID": OWNER_EMAIL, "GHOSTLINE_TEST_SIGNER_KEY": SIGNER, "GHOSTLINE_ENV": "test",
             "GHOSTLINE_WORKER_TOKEN": "worker-token-for-tests", "GHOSTLINE_MIGRATIONS": MIGRATIONS,
-            "GHOSTLINE_APPLE_AUDIENCE": AUDIENCE, "GHOSTLINE_E6B_CANARY": "on"}
+            "GHOSTLINE_APPLE_AUDIENCE": AUDIENCE}
     base.update(over)
     return Settings(**base)
 
