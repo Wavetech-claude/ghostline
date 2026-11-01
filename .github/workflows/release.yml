@@ -3,6 +3,12 @@ name: Release
 # Runs on the `v*` tag the release tap creates (only the GitHub App may create one: tag ruleset "release tags").
 # Archives both destinations and uploads them to TestFlight with the App Store Connect key held by the `testflight`
 # environment, which only `v*` tags may use. MARKETING_VERSION = VERSION; CURRENT_PROJECT_VERSION = this run's number.
+#
+# Signing uses ONE stored Apple Development certificate (DEV_CERT_P12 + DEV_CERT_PASSWORD in the `testflight`
+# environment), imported into a keychain that lives only for this run. Without it, the runner starts with no
+# certificate and Xcode makes a new one on every run; their keys die with the runner, and on 2026-11-01 twenty of them
+# had filled the team's limit, so every release from v0.18.0 to v0.22.0 failed to sign. The last step fails the run if
+# Xcode made a new certificate anyway.
 on:
   push:
     tags: ['v*']
@@ -50,6 +56,29 @@ jobs:
           printf '%s' "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
           chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
 
+      - name: The build machine's signing certificate
+        env:
+          DEV_CERT_P12: ${{ secrets.DEV_CERT_P12 }}
+          DEV_CERT_PASSWORD: ${{ secrets.DEV_CERT_PASSWORD }}
+        run: |
+          [ -n "$DEV_CERT_P12" ] && [ -n "$DEV_CERT_PASSWORD" ] || {
+            echo "::error::DEV_CERT_P12 or DEV_CERT_PASSWORD is missing from the testflight environment"; exit 1; }
+          kc="$RUNNER_TEMP/ci.keychain-db"
+          kc_pw="$(openssl rand -hex 24)"
+          security create-keychain -p "$kc_pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_pw" "$kc"
+          printf '%s' "$DEV_CERT_P12" | base64 --decode > "$RUNNER_TEMP/dev.p12"
+          security import "$RUNNER_TEMP/dev.p12" -P "$DEV_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc" >/dev/null
+          rm -f "$RUNNER_TEMP/dev.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$kc_pw" "$kc" >/dev/null
+          # The run's keychain first, then whatever the runner already searches.
+          eval "security list-keychains -d user -s \"$kc\" $(security list-keychains -d user | tr '\n' ' ')"
+          security find-identity -v -p codesigning > "$RUNNER_TEMP/identities-before.txt"
+          grep -q "Apple Development" "$RUNNER_TEMP/identities-before.txt" || {
+            echo "::error::the stored certificate did not import as a signing identity"; exit 1; }
+          sed -E 's/^ *[0-9]+\) [0-9A-F]+ //' "$RUNNER_TEMP/identities-before.txt"
+
       - name: Archive and upload, iOS
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -82,6 +111,19 @@ jobs:
             -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
+      - name: No new certificate was made
+        run: |
+          security find-identity -v -p codesigning > "$RUNNER_TEMP/identities-after.txt"
+          new="$(grep -o '[0-9A-F]\{40\}' "$RUNNER_TEMP/identities-after.txt" \
+            | grep -v -x -F -f <(grep -o '[0-9A-F]\{40\}' "$RUNNER_TEMP/identities-before.txt") || true)"
+          if [ -n "$new" ]; then
+            echo "::error::Xcode made a new signing certificate in this run; the stored one was not used. Each run would add one until the team's limit is full. Revoke it in App Store Connect and fix the signing setup."
+            exit 1
+          fi
+          echo "Signed with the stored certificate only."
+
       - name: Forget the key
         if: always()
-        run: rm -rf "$RUNNER_TEMP/asc"
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/dev.p12"
+          security delete-keychain "$RUNNER_TEMP/ci.keychain-db" 2>/dev/null || true

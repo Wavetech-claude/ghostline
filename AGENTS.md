@@ -15,7 +15,7 @@ not investment advice, and it never places a real trade.
 | `VERSION` | the one version of the whole repository (`x.y.z`) |
 | `CHANGELOG.md` | one `## [x.y.z]` section per release; the section is the release notes |
 | `.github/workflows/ci.yml` | the required checks `backend` and `apps` |
-| `.github/workflows/release.yml` | runs on a `v*` tag: archives and uploads both apps to TestFlight |
+| `.github/workflows/release.yml` | runs on a `v*` tag: archives and uploads both apps to TestFlight. Signs with ONE stored certificate (`DEV_CERT_P12`/`DEV_CERT_PASSWORD`, environment `testflight`); never remove that step, or Xcode makes a new certificate on every run until Apple's limit is full (it was, 2026-11-01) |
 
 ## Environments
 
