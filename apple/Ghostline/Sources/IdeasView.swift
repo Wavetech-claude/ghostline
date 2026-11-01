@@ -158,8 +158,10 @@ struct IdeaDetailView: View {
                 }
             }
             Section {
-                NavigationLink { ChartsView(ticker: idea.ticker) } label: { Label("Chart", systemImage: "chart.xyaxis.line") }
-                NavigationLink { TickerView(ticker: idea.ticker) } label: { Label("News and Earnings", systemImage: "newspaper") }
+                NavigationLink { TickerView(ticker: idea.ticker) } label: {
+                    Label("\(idea.ticker): Price, News and Earnings", systemImage: "chart.xyaxis.line")
+                }
+                NavigationLink { ChartsView(ticker: idea.ticker) } label: { Label("Advanced Chart", systemImage: "chart.bar.xaxis") }
                 Button { practice.openTicket(ticker: idea.ticker) } label: { Label("Try It in Practice", systemImage: "cart") }
             }
             Section {
