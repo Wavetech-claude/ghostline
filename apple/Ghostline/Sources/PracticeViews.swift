@@ -5,6 +5,7 @@ import SwiftUI
 /// every order with how it ended. Pretend money, real prices.
 struct PracticeAccountView: View {
     @Environment(PracticeModel.self) private var practice
+    @State private var replacing: OrderRow?
 
     var body: some View {
         List {
@@ -54,6 +55,9 @@ struct PracticeAccountView: View {
                             if o.isOpen {
                                 Button("Cancel", role: .destructive) { Task { await practice.cancel(o) } }
                             }
+                            if o.isReplaceable {
+                                Button("Replace") { replacing = o }.tint(.ghost)
+                            }
                         }
                 }
                 if practice.orders.isEmpty {
@@ -61,7 +65,9 @@ struct PracticeAccountView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            ResetBookSection(book: "practice", name: "Practice", lastReset: practice.account?.lastReset)
         }
+        .sheet(item: $replacing) { ReplaceOrderSheet(order: $0) }
         .navigationTitle("Practice")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

@@ -26,6 +26,20 @@ PT = ZoneInfo("America/Los_Angeles")
 BUYING = ("buy", "buy_to_close")
 OPENING = ("buy", "sell_to_open")
 SIMULATED_BOOKS = ("practice", "ai", "options")   # the real book is placed by the owner at the broker, never here
+REPLACEABLE = ("limit", "stop", "stop_limit")       # Robinhood's rule: a pending limit or stop order, same type
+
+
+class ReplaceRefused(Exception):
+    """The order cannot be replaced; the old order is untouched."""
+
+
+@dataclass(frozen=True)
+class Assessment:
+    book_id: int
+    order: dict                 # the order as it would be stored (an option's ticker and symbol filled in)
+    quote: dict | None
+    refusal: str | None         # None = the order passes
+    rule: str | None = None
 
 
 # ── pure rules ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -101,17 +115,17 @@ class Practice:
     def short_legs(self, book_id: int) -> dict[str, Decimal]:
         rows = self.db.fetch_all(
             "SELECT option_symbol, SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) AS open_qty "
-            "FROM trades WHERE book_id = %s AND asset = 'option' GROUP BY option_symbol "
+            "FROM live_trades WHERE book_id = %s AND asset = 'option' GROUP BY option_symbol "
             "HAVING SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) > 0", (book_id,))
         return {r["option_symbol"]: Decimal(r["open_qty"]) for r in rows}
 
     def facts(self, book_id: int) -> Facts:
         flows = [Decimal(f["amount"]) for f in
-                 self.db.fetch_all("SELECT amount FROM cash_flows WHERE book_id = %s", (book_id,))]
-        rows = self.db.fetch_all("SELECT * FROM trades WHERE book_id = %s ORDER BY at, id", (book_id,))
+                 self.db.fetch_all("SELECT amount FROM live_cash_flows WHERE book_id = %s", (book_id,))]
+        rows = self.db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s ORDER BY at, id", (book_id,))
         trades = [Trade.from_row(r) for r in rows]
         cash = ledger.cash_balance(flows, trades)
-        un = self.db.fetch_one("SELECT COALESCE(SUM(s.amount), 0) AS amount FROM settlements s JOIN trades t "
+        un = self.db.fetch_one("SELECT COALESCE(SUM(s.amount), 0) AS amount FROM settlements s JOIN live_trades t "
                                "ON t.id = s.trade_id WHERE t.book_id = %s AND NOT s.settled", (book_id,))
         unsettled = ledger.money(un["amount"]) if un else Decimal(0)
         legs = self.short_legs(book_id)
@@ -181,18 +195,71 @@ class Practice:
     def place(self, o: dict[str, Any], by: str) -> dict:
         """Validate, run the risk rules for an opening order, check the cash account, store the order, and fill it at
         once when the stored quote allows. The answer is the order row; a refusal carries its reason."""
+        a = self.assess(o)
+        if a.refusal:
+            return self._store(a.order, a.book_id, "refused", a.refusal, rule=a.rule)
+        row = self._store(a.order, a.book_id, "open", None)
+        if a.quote:
+            self.try_fill(row, a.quote)
+            row = self.db.fetch_one("SELECT * FROM orders WHERE id = %s", (row["id"],))
+        return row
+
+    def replace(self, order_id: int, changes: dict[str, Any]) -> dict:
+        """Replace an open limit, stop or stop-limit order with the same order changed (price, stop, quantity, time in
+        force): the new order passes every check a new order passes, then, in one transaction, the old one ends
+        'replaced' and the new one is stored naming it. A refused replacement leaves the old order open, unchanged.
+        The new order fills at once when the stored quote allows, as a new order does."""
+        old = self.db.fetch_one("SELECT o.*, b.kind AS book FROM orders o JOIN books b ON b.id = o.book_id "
+                                "WHERE o.id = %s", (order_id,))
+        if not old:
+            raise LookupError(f"no order {order_id}")
+        if old["status"] != "open":
+            raise ReplaceRefused(f"the order is {old['status']}, not open: only an open order is replaced")
+        if old["type"] not in REPLACEABLE:
+            raise ReplaceRefused("only a limit, stop or stop-limit order is replaced; cancel a market order instead")
+        o = {k: old[k] for k in ("book", "ticker", "asset", "side", "type", "tif", "quantity", "limit_price",
+                                 "stop_price", "stop_loss", "option_symbol", "note", "idea_id", "lane")}
+        o.update({k: v for k, v in changes.items() if v is not None})
+        if o["type"] in ("limit", "stop_limit") and o.get("limit_price") is None:
+            raise ReplaceRefused(f"a {o['type']} order needs a limit price")
+        if o["type"] in ("stop", "stop_limit") and o.get("stop_price") is None:
+            raise ReplaceRefused(f"a {o['type']} order needs a stop price")
+        a = self.assess(o)
+        if a.refusal:
+            raise ReplaceRefused(f"{a.rule}: {a.refusal}" if a.rule else a.refusal)
+        with self.db.connection() as conn:
+            done = conn.execute("UPDATE orders SET status = 'replaced', reason = 'replaced by the owner' "
+                                "WHERE id = %s AND status = 'open' RETURNING id", (order_id,)).fetchone()
+            if not done:
+                conn.rollback()
+                raise ReplaceRefused("the order is no longer open (it filled or ended meanwhile)")
+            new = self._insert(conn, a.order, a.book_id, "open", None, replaces=order_id)
+            conn.execute("UPDATE orders SET reason = %s WHERE id = %s", (f"replaced by order {new['id']}", order_id))
+            conn.commit()
+        if a.quote:
+            self.try_fill(new, a.quote)
+        return self.db.fetch_one("SELECT * FROM orders WHERE id = %s", (new["id"],))
+
+    def assess(self, o: dict[str, Any]) -> Assessment:
+        """Every check an order passes before it is stored: the book, the option's kind and expiry, the position a
+        closing order needs, the risk rules and the cash an opening order needs. Stores nothing."""
+        o = dict(o)
         book_kind = o.get("book", "practice")
         if book_kind not in SIMULATED_BOOKS:
             raise ValueError(f"{book_kind} is not a simulated book: real money is placed at the broker")
         book_id = self.book_id(book_kind)
+
+        def refuse(why: str, rule: str | None = None, quote: dict | None = None) -> Assessment:
+            return Assessment(book_id, o, quote, why, rule)
+
         symbol = o.get("option_symbol")
         opt = None
         if o["asset"] == "option":
             opt = occ.parse(symbol)
             if opt.kind != "put":
-                return self._store(o, book_id, "refused", "only puts are sold here: cash-secured puts only")
+                return refuse("only puts are sold here: cash-secured puts only")
             if opt.expiry < dt.date.today():
-                return self._store(o, book_id, "refused", f"{opt.symbol} expired on {opt.expiry}")
+                return refuse(f"{opt.symbol} expired on {opt.expiry}")
             o["ticker"] = opt.underlying
             symbol = opt.symbol
         quote = self.latest_quote(symbol or o["ticker"])
@@ -206,34 +273,29 @@ class Practice:
         if o["side"] == "sell":
             held = self._held(book_id, o["ticker"])
             if held < qty:
-                return self._store(o, book_id, "refused", f"you hold {held} {o['ticker']} in {book_kind}, not {qty}")
+                return refuse(f"you hold {held} {o['ticker']} in {book_kind}, not {qty}")
         elif o["side"] == "buy_to_close":
             open_n = facts.short_legs.get(symbol, Decimal(0))
             if open_n < qty:
-                return self._store(o, book_id, "refused", f"{open_n} open {symbol} contracts, not {qty}")
+                return refuse(f"{open_n} open {symbol} contracts, not {qty}")
         else:
             ref = o.get("limit_price") or o.get("stop_price") or (ask if o["side"] == "buy" else bid)
             decision = self._risk(o, opt, qty, ref, bid, ask, facts, book_kind)
             if not decision.passed:
-                return self._store(o, book_id, "refused", decision.reason, rule=decision.rule)
+                return refuse(decision.reason, decision.rule)
             if o["side"] == "buy":
                 if ref is None:
-                    return self._store(o, book_id, "refused", f"no stored price for {o['ticker']} yet")
+                    return refuse(f"no stored price for {o['ticker']} yet")
                 need = ledger.money(qty * Decimal(ref) + fee)
                 if need > facts.available:
                     why = (f"needs {need}, available {facts.available}"
                            + (f" ({facts.unsettled} unsettled)" if facts.unsettled else ""))
-                    return self._store(o, book_id, "refused", why)
+                    return refuse(why)
             else:   # sell_to_open a put: the collateral comes out of the available cash
                 need = ledger.money(opt.collateral_per_contract * qty + fee)
                 if need > facts.available:
-                    return self._store(o, book_id, "refused",
-                                       f"collateral {need} exceeds the available cash {facts.available}")
-        row = self._store(o, book_id, "open", None)
-        if quote:
-            self.try_fill(row, quote)
-            row = self.db.fetch_one("SELECT * FROM orders WHERE id = %s", (row["id"],))
-        return row
+                    return refuse(f"collateral {need} exceeds the available cash {facts.available}")
+        return Assessment(book_id, o, quote, None)
 
     def _risk(self, o, opt, qty, ref, bid, ask, facts: Facts, book_kind: str) -> risk.Decision:
         stop_loss = Decimal(o["stop_loss"]) if o.get("stop_loss") else None
@@ -274,16 +336,20 @@ class Practice:
 
     def _store(self, o: dict, book_id: int, status: str, reason: str | None, rule: str | None = None) -> dict:
         why = f"{rule}: {reason}" if rule else reason
-        row = self.db.fetch_one(
-            "INSERT INTO orders (book_id, ticker, asset, side, type, tif, quantity, limit_price, stop_price, "
-            "stop_loss, option_symbol, status, reason, note, idea_id, lane) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
-            (book_id, o["ticker"], o["asset"], o["side"], o.get("type", "market"), o.get("tif", "day"),
-             o["quantity"], o.get("limit_price"), o.get("stop_price"), o.get("stop_loss"), o.get("option_symbol"),
-             status, why, o.get("note"), o.get("idea_id"), o.get("lane")))
         with self.db.connection() as conn:
+            row = self._insert(conn, o, book_id, status, why)
             conn.commit()
         return row
+
+    @staticmethod
+    def _insert(conn: Any, o: dict, book_id: int, status: str, why: str | None, replaces: int | None = None) -> dict:
+        return conn.execute(
+            "INSERT INTO orders (book_id, ticker, asset, side, type, tif, quantity, limit_price, stop_price, "
+            "stop_loss, option_symbol, status, reason, note, idea_id, lane, replaces_order_id) VALUES (%s, %s, %s, "
+            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (book_id, o["ticker"], o["asset"], o["side"], o.get("type", "market"), o.get("tif", "day"),
+             o["quantity"], o.get("limit_price"), o.get("stop_price"), o.get("stop_loss"), o.get("option_symbol"),
+             status, why, o.get("note"), o.get("idea_id"), o.get("lane"), replaces)).fetchone()
 
     # ── filling ──
     def try_fill(self, order: dict, quote: dict) -> bool:
@@ -371,7 +437,7 @@ class Practice:
         at = session_close(opt.expiry, Calendar.load(self.db))     # a holiday expiry: the session before it
         kind = "assignment" if assigned else "expiry"
         with self.db.connection() as conn:
-            opened = conn.execute("SELECT id FROM trades WHERE book_id = %s AND option_symbol = %s AND "
+            opened = conn.execute("SELECT id FROM live_trades WHERE book_id = %s AND option_symbol = %s AND "
                                   "side = 'sell_to_open' ORDER BY at DESC LIMIT 1", (book_id, opt.symbol)).fetchone()
             t = conn.execute(
                 "INSERT INTO trades (book_id, ticker, asset, side, quantity, fill, at, fees, broker, note, "

@@ -49,7 +49,7 @@ def _s(d: Decimal | None) -> str | None:
 
 
 def _real_trades(db: Database, before: dt.datetime | None = None) -> list[dict]:
-    sql = "SELECT t.* FROM trades t JOIN books b ON b.id = t.book_id WHERE b.kind = 'real'"
+    sql = "SELECT t.* FROM live_trades t JOIN books b ON b.id = t.book_id WHERE b.kind = 'real'"
     params: tuple = ()
     if before is not None:
         sql, params = sql + " AND t.at < %s", (before,)
@@ -172,7 +172,7 @@ def compare(db: Database, statement: dict) -> dict[str, Any]:
     broker_shares = {h["ticker"].upper(): Decimal(str(h["quantity"])) for h in statement["positions"]}
     real = db.fetch_one("SELECT id FROM books WHERE kind = 'real'")
     flows = [Decimal(f["amount"]) for f in db.fetch_all(
-        "SELECT amount FROM cash_flows WHERE book_id = %s AND at < %s", (real["id"], until))] if real else []
+        "SELECT amount FROM live_cash_flows WHERE book_id = %s AND at < %s", (real["id"], until))] if real else []
     app_cash = ledger.money(ledger.cash_balance(flows, trades))
     lines = []
     for t in sorted(set(app_shares) | set(broker_shares)):

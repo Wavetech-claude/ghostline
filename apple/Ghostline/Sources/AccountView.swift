@@ -37,6 +37,9 @@ struct AccountView: View {
                 }
             }
             Section("Records") {
+                NavigationLink { RealEntriesView() } label: {
+                    Label("Real Book Entries", systemImage: "pencil.and.list.clipboard")
+                }
                 NavigationLink { TodoListView() } label: {
                     Label("To Place at Your Broker", systemImage: "checklist")
                 }

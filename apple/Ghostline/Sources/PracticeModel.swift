@@ -44,6 +44,32 @@ final class PracticeModel {
         }
     }
 
+    /// Replaces an open limit or stop order; nil (with the reason in `error`) when it was refused and the old order
+    /// stays open.
+    func replace(_ order: OrderRow, _ input: ReplaceInput) async -> OrderRow? {
+        var made: OrderRow?
+        let book = order.book ?? "practice"
+        _ = await run {
+            made = try await self.client.replaceOrder(id: order.id, input)
+            self.account = try await self.client.practiceAccount(book: book)
+            self.orders = try await self.client.orders(book: book)
+        }
+        return made
+    }
+
+    /// Starts a practice, AI or options book over; its entries stay, voided.
+    func reset(book: String, deposit: String?) async -> ResetResult? {
+        var done: ResetResult?
+        _ = await run {
+            done = try await self.client.resetBook(book, deposit: deposit)
+            if book == "practice" {
+                self.account = try await self.client.practiceAccount(book: book)
+                self.orders = try await self.client.orders(book: book)
+            }
+        }
+        return done
+    }
+
     func openTicket(ticker: String = "", option: OptionRow? = nil) {
         ticketTicker = ticker
         ticketOption = option

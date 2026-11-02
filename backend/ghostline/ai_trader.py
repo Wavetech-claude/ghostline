@@ -145,7 +145,7 @@ class AITrader:
     def run_exits(self) -> dict[str, Any]:
         """Every 30 minutes in the session: a held position whose idea's stop, target or horizon is reached is sold."""
         bid = self.book_id
-        trades = [Trade.from_row(r) for r in self.db.fetch_all("SELECT * FROM trades WHERE book_id = %s", (bid,))]
+        trades = [Trade.from_row(r) for r in self.db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s", (bid,))]
         _, positions = ledger.settle(trades)
         out: dict[str, Any] = {"sold": [], "held": 0, "closed_puts": []}
         for pos in positions:
@@ -155,7 +155,8 @@ class AITrader:
             ):
                 continue
             origin = self.db.fetch_one(
-                "SELECT t.at, i.id, i.stop, i.target, s.horizon_days FROM trades t JOIN ideas i ON i.id = t.idea_id "
+                "SELECT t.at, i.id, i.stop, i.target, s.horizon_days FROM live_trades t "
+                "JOIN ideas i ON i.id = t.idea_id "
                 "JOIN signals s ON s.id = i.signal_id WHERE t.book_id = %s AND t.ticker = %s AND t.side = 'buy' "
                 "ORDER BY t.at DESC LIMIT 1",
                 (bid, pos.ticker),
@@ -191,7 +192,7 @@ class AITrader:
             out["sold"].append({"ticker": pos.ticker, "order": row["id"], "status": row["status"], "why": why})
         for symbol, n in self.p.facts(bid).short_legs.items():
             leg = self.db.fetch_one(
-                "SELECT i.id, i.stop FROM trades t JOIN ideas i ON i.id = t.idea_id WHERE t.book_id = %s AND "
+                "SELECT i.id, i.stop FROM live_trades t JOIN ideas i ON i.id = t.idea_id WHERE t.book_id = %s AND "
                 "t.option_symbol = %s AND t.side = 'sell_to_open' ORDER BY t.at DESC LIMIT 1",
                 (bid, symbol),
             )
@@ -262,7 +263,7 @@ def copy_trade(db: Database, trade_id: int, to: str) -> dict[str, Any]:
     when the trade's lane has graduated. A copy of a sale sells what the target holds of that ticker."""
     p = Practice(db)
     t = db.fetch_one(
-        "SELECT t.*, b.kind AS book FROM trades t JOIN books b ON b.id = t.book_id WHERE t.id = %s", (trade_id,)
+        "SELECT t.*, b.kind AS book FROM live_trades t JOIN books b ON b.id = t.book_id WHERE t.id = %s", (trade_id,)
     )
     if not t or t["book"] != "ai":
         raise CopyRefused("only an AI trader trade can be copied")

@@ -6,8 +6,10 @@ struct HistoryView: View {
     @Environment(LedgerModel.self) private var ledger
     @State private var book = "all"
     @State private var result = "all"
+    @State private var voiding: VoidTarget?
 
     var body: some View {
+        @Bindable var ledger = ledger
         List {
             if let h = ledger.history {
                 Section {
@@ -35,13 +37,38 @@ struct HistoryView: View {
                 }
                 Section("Closed") {
                     ForEach(h.closed) { trade in
-                        if trade.ideaId != nil || trade.memoId != nil {
-                            NavigationLink { TradeReasonsView(trade: trade) } label: { ClosedRow(trade: trade) }
-                        } else {
-                            ClosedRow(trade: trade)
+                        Group {
+                            if trade.ideaId != nil || trade.memoId != nil {
+                                NavigationLink { TradeReasonsView(trade: trade) } label: { ClosedRow(trade: trade) }
+                            } else {
+                                ClosedRow(trade: trade)
+                            }
+                        }
+                        .contextMenu {
+                            if trade.book == "real" {
+                                Button("Void This Sale", role: .destructive) {
+                                    voiding = .trade(trade.tradeId, "the \(trade.ticker) sale")
+                                }
+                            }
                         }
                     }
                     if h.closed.isEmpty { Text("No closed trade yet.").foregroundStyle(.secondary) }
+                }
+                if let voided = h.voided, !voided.isEmpty {
+                    Section {
+                        ForEach(voided) { t in
+                            TradeEntryRow(trade: t)
+                                .swipeActions {
+                                    if t.book == "real" {
+                                        Button("Unvoid") { Task { _ = await ledger.setVoided(trade: t.id, false) } }.tint(.blue)
+                                    }
+                                }
+                        }
+                    } header: {
+                        Text("Voided")
+                    } footer: {
+                        Text("Kept in your records and left out of every number above.")
+                    }
                 }
             } else if let error = ledger.error {
                 Text(error).foregroundStyle(.secondary)
@@ -56,7 +83,11 @@ struct HistoryView: View {
                     .keyboardShortcut("n", modifiers: .command)
             }
             ToolbarItem(placement: .secondaryAction) {
+                NavigationLink { RealEntriesView() } label: { Label("Edit Entries", systemImage: "pencil") }
+            }
+            ToolbarItem(placement: .secondaryAction) {
                 Menu {
+                    Toggle("Show Voided", isOn: $ledger.showVoided)
                     Picker("Book", selection: $book) {
                         Text("All Books").tag("all")
                         Text("Real").tag("real")
@@ -75,6 +106,8 @@ struct HistoryView: View {
         .refreshable { await reload() }
         .onChange(of: book) { Task { await reload() } }
         .onChange(of: result) { Task { await reload() } }
+        .onChange(of: ledger.showVoided) { Task { await reload() } }
+        .voidPrompt($voiding)
     }
 
     private func reload() async {

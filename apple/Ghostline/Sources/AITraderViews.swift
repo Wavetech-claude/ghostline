@@ -67,6 +67,7 @@ struct AITraderView: View {
             } else {
                 ProgressView()
             }
+            ResetBookSection(book: "ai", name: "AI Trader", onDone: { await load() })
         }
         .navigationTitle("AI Trader")
         .toolbar {
@@ -204,6 +205,7 @@ struct OptionsPracticeView: View {
             } else {
                 ProgressView()
             }
+            ResetBookSection(book: "options", name: "Options Practice", onDone: { await load() })
         }
         .navigationTitle("Options Practice")
         .toolbar {

@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from ghostline import ledger, prices
+from ghostline import corrections, ledger, prices
 from ghostline.auth import OwnerSub
 from ghostline.ghost import Ghost
 from ghostline.ledger import Trade
@@ -50,7 +50,8 @@ def _row(r: dict) -> dict:
 
 
 def _flows(db: Any, book_id: int) -> list[Decimal]:
-    return [Decimal(f["amount"]) for f in db.fetch_all("SELECT amount FROM cash_flows WHERE book_id = %s", (book_id,))]
+    rows = db.fetch_all("SELECT amount FROM live_cash_flows WHERE book_id = %s", (book_id,))
+    return [Decimal(f["amount"]) for f in rows]
 
 
 # ── books and cash ─────────────────────────────────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ def books(request: Request, sub: str = OwnerSub) -> dict:
     out = []
     for b in rows:
         flows = _flows(db, b["id"])
-        trades = [Trade.from_row(t) for t in db.fetch_all("SELECT * FROM trades WHERE book_id = %s", (b["id"],))]
+        trades = [Trade.from_row(t) for t in db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s", (b["id"],))]
         out.append({**_row(b), "deposits": str(ledger.money(sum((f for f in flows if f > 0), Decimal(0)))),
                     "withdrawals": str(ledger.money(-sum((f for f in flows if f < 0), Decimal(0)))),
                     "cash": str(ledger.cash_balance(flows, trades)), "trades": len(trades)})
@@ -99,15 +100,88 @@ def add_cash_flow(body: CashFlow, request: Request, sub: str = OwnerSub) -> dict
 
 
 @router.get("/cash-flows")
-def cash_flows(request: Request, book: str | None = None, sub: str = OwnerSub) -> dict:
+def cash_flows(request: Request, book: str | None = None, include_voided: bool = False,
+               sub: str = OwnerSub) -> dict:
+    """Deposits and withdrawals, newest first. Voided entries only with include_voided (each says when and why)."""
     db = request.app.state.db
-    if book:
-        rows = db.fetch_all("SELECT f.*, b.kind AS book FROM cash_flows f JOIN books b ON b.id = f.book_id "
-                            "WHERE b.kind = %s ORDER BY at DESC, id DESC", (book,))
-    else:
-        rows = db.fetch_all("SELECT f.*, b.kind AS book FROM cash_flows f JOIN books b ON b.id = f.book_id "
-                            "ORDER BY at DESC, id DESC")
-    return {"cash_flows": [_row(r) for r in rows]}
+    table = "cash_flows" if include_voided else "live_cash_flows"
+    where, params = ("WHERE b.kind = %s ", (book,)) if book else ("", ())
+    sql = (f"SELECT f.*, b.kind AS book FROM {table} f JOIN books b ON b.id = f.book_id "  # includes voided on request
+           f"{where}ORDER BY at DESC, id DESC")
+    return {"cash_flows": [_row(r) for r in db.fetch_all(sql, params)]}
+
+
+class CashFlowEdit(BaseModel):
+    amount: Decimal | None = None
+    at: dt.datetime | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+class VoidIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+def _refusal(exc: Exception) -> HTTPException:
+    if isinstance(exc, corrections.NotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=409, detail=str(exc))
+
+
+def _flow_out(db: Any, flow_id: int) -> dict:
+    row = db.fetch_one("SELECT f.*, b.kind AS book "
+                       "FROM cash_flows f JOIN books b ON b.id = f.book_id "  # includes voided
+                       "WHERE f.id = %s", (flow_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail=f"no cash flow {flow_id}")
+    return {**_row(row), "edits": [_row(e) for e in corrections.history(db, "cash_flow", flow_id)]}
+
+
+@router.get("/cash-flows/{flow_id}")
+def get_cash_flow(flow_id: int, request: Request, sub: str = OwnerSub) -> dict:
+    return _flow_out(request.app.state.db, flow_id)
+
+
+@router.patch("/cash-flows/{flow_id}")
+def edit_cash_flow(flow_id: int, body: CashFlowEdit, request: Request, sub: str = OwnerSub) -> dict:
+    """Correct a real-book deposit or withdrawal; every changed field is kept in its edit history."""
+    db = request.app.state.db
+    row = _flow_out(db, flow_id)
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="nothing to change")
+    emptied = [k for k, v in changes.items() if v is None and k != "note"]
+    if emptied:
+        raise HTTPException(status_code=422, detail=f"cannot be emptied: {', '.join(emptied)}")
+    merged = {"book": "real", "amount": row["amount"], "at": row["at"], "note": row["note"], **changes}
+    try:
+        valid = CashFlow(**merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        changed = corrections.edit_flow(db, flow_id, {k: getattr(valid, k) for k in changes})
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return {**_flow_out(db, flow_id), "changed": changed}
+
+
+@router.post("/cash-flows/{flow_id}/void")
+def void_cash_flow(flow_id: int, body: VoidIn, request: Request, sub: str = OwnerSub) -> dict:
+    db = request.app.state.db
+    try:
+        corrections.set_flow_void(db, flow_id, True, body.reason)
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return _flow_out(db, flow_id)
+
+
+@router.post("/cash-flows/{flow_id}/unvoid")
+def unvoid_cash_flow(flow_id: int, request: Request, sub: str = OwnerSub) -> dict:
+    db = request.app.state.db
+    try:
+        corrections.set_flow_void(db, flow_id, False)
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return _flow_out(db, flow_id)
 
 
 # ── trades ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -139,18 +213,25 @@ class TradeIn(BaseModel):
             raise HTTPException(status_code=422, detail="an option trade names its option_symbol")
 
 
-class TradePatch(BaseModel):
-    quantity: Decimal | None = Field(default=None, gt=0)
-    fill: Decimal | None = Field(default=None, ge=0)
+class TradeEdit(BaseModel):
+    """Any field of a real-book trade; only the fields sent change. The result is checked like a new trade."""
+    ticker: str | None = None
+    asset: str | None = None
+    side: str | None = None
+    quantity: Decimal | None = None
+    fill: Decimal | None = None
     at: dt.datetime | None = None
-    fees: Decimal | None = Field(default=None, ge=0)
-    broker: str | None = Field(default=None, max_length=80)
-    note: str | None = Field(default=None, max_length=2000)
-    lane: str | None = Field(default=None, pattern="^(long|swing|puts|day)$")
+    fees: Decimal | None = None
+    broker: str | None = None
+    note: str | None = None
+    option_symbol: str | None = None
+    lane: str | None = None
 
 
-_TRADE_SQL = ("SELECT t.*, b.kind AS book, (SELECT count(*) FROM attachments a WHERE a.trade_id = t.id) AS attachments "
-              "FROM trades t JOIN books b ON b.id = t.book_id")
+_COLUMNS = "t.*, b.kind AS book, (SELECT count(*) FROM attachments a WHERE a.trade_id = t.id) AS attachments "
+_TRADE_SQL = "SELECT " + _COLUMNS + "FROM live_trades t JOIN books b ON b.id = t.book_id"
+_ALL_TRADES_SQL = "SELECT " + _COLUMNS + "FROM trades t JOIN books b ON b.id = t.book_id"  # includes voided
+_CLEARABLE = ("broker", "note", "option_symbol", "lane")
 
 
 @router.post("/trades", status_code=201)
@@ -169,16 +250,56 @@ def add_trade(body: TradeIn, request: Request, sub: str = OwnerSub) -> dict:
 
 
 @router.patch("/trades/{trade_id}")
-def patch_trade(trade_id: int, body: TradePatch, request: Request, sub: str = OwnerSub) -> dict:
+def edit_trade(trade_id: int, body: TradeEdit, request: Request, sub: str = OwnerSub) -> dict:
+    """Correct a real-book trade. Every changed field is kept in its edit history; a change that would leave a later
+    sale selling more than the book holds is refused (409), as is an entry written by a corporate action."""
     db = request.app.state.db
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not fields:
-        raise HTTPException(status_code=422, detail="nothing to change")
-    sets = ", ".join(f"{k} = %s" for k in fields)
-    n = db.execute(f"UPDATE trades SET {sets} WHERE id = %s", (*fields.values(), trade_id))  # noqa: S608 — keys are the model's
-    if not n:
+    row = db.fetch_one(_ALL_TRADES_SQL + " WHERE t.id = %s", (trade_id,))
+    if not row:
         raise HTTPException(status_code=404, detail="no such trade")
-    return _row(db.fetch_one(_TRADE_SQL + " WHERE t.id = %s", (trade_id,)))
+    try:
+        corrections.check_editable(db, row)
+    except corrections.Refused as exc:
+        raise _refusal(exc) from exc
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="nothing to change")
+    emptied = [k for k, v in changes.items() if v is None and k not in _CLEARABLE]
+    if emptied:
+        raise HTTPException(status_code=422, detail=f"cannot be emptied: {', '.join(emptied)}")
+    merged = {k: row.get(k) for k in corrections.TRADE_FIELDS} | changes
+    merged["book"] = "real"
+    try:
+        valid = TradeIn(**merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    valid.check()
+    try:
+        changed = corrections.edit_trade(db, trade_id, {k: getattr(valid, k) for k in changes})
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return {**_trade_out(db, trade_id), "changed": changed}
+
+
+@router.post("/trades/{trade_id}/void")
+def void_trade(trade_id: int, body: VoidIn, request: Request, sub: str = OwnerSub) -> dict:
+    """Void a real-book trade (and its conversion partner): it stays, struck through, and leaves every number."""
+    db = request.app.state.db
+    try:
+        ids = corrections.set_trade_void(db, trade_id, True, body.reason)
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return {**_trade_out(db, trade_id), "voided_ids": ids}
+
+
+@router.post("/trades/{trade_id}/unvoid")
+def unvoid_trade(trade_id: int, request: Request, sub: str = OwnerSub) -> dict:
+    db = request.app.state.db
+    try:
+        ids = corrections.set_trade_void(db, trade_id, False)
+    except (corrections.Refused, corrections.NotFound) as exc:
+        raise _refusal(exc) from exc
+    return {**_trade_out(db, trade_id), "unvoided_ids": ids}
 
 
 def _filters(book, ticker, since, until, side, asset, lane) -> tuple[str, list]:
@@ -195,32 +316,41 @@ def _filters(book, ticker, since, until, side, asset, lane) -> tuple[str, list]:
 @router.get("/trades")
 def list_trades(request: Request, sub: str = OwnerSub, book: str | None = None, ticker: str | None = None,
                 since: dt.datetime | None = None, until: dt.datetime | None = None, side: str | None = None,
-                asset: str | None = None, lane: str | None = None, limit: int = Query(default=200, le=1000)) -> dict:
+                asset: str | None = None, lane: str | None = None, limit: int = Query(default=200, le=1000),
+                include_voided: bool = False) -> dict:
     db = request.app.state.db
     where, params = _filters(book, ticker, since, until, side, asset, lane)
-    rows = db.fetch_all(_TRADE_SQL + where + " ORDER BY t.at DESC, t.id DESC LIMIT %s", (*params, limit))
+    sql = _ALL_TRADES_SQL if include_voided else _TRADE_SQL
+    rows = db.fetch_all(sql + where + " ORDER BY t.at DESC, t.id DESC LIMIT %s", (*params, limit))
     return {"trades": [_row(r) for r in rows]}
+
+
+def _trade_out(db: Any, trade_id: int) -> dict:
+    row = db.fetch_one(_ALL_TRADES_SQL + " WHERE t.id = %s", (trade_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="no such trade")
+    return {**_row(row), "edits": [_row(e) for e in corrections.history(db, "trade", trade_id)]}
 
 
 @router.get("/trades/{trade_id}")
 def get_trade(trade_id: int, request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
-    row = db.fetch_one(_TRADE_SQL + " WHERE t.id = %s", (trade_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="no such trade")
+    out = _trade_out(db, trade_id)
     events = db.fetch_all("SELECT * FROM option_events WHERE trade_id = %s ORDER BY at", (trade_id,))
     files = db.fetch_all("SELECT id, content_type, bytes, filename, created_at FROM attachments WHERE trade_id = %s "
                          "ORDER BY id", (trade_id,))
-    return {**_row(row), "option_events": [_row(e) for e in events], "attachment_list": [_row(f) for f in files]}
+    return {**out, "option_events": [_row(e) for e in events], "attachment_list": [_row(f) for f in files]}
 
 
 # ── history ────────────────────────────────────────────────────────────────────────────────────────────────
 @router.get("/history")
 def history(request: Request, sub: str = OwnerSub, book: str | None = None, ticker: str | None = None,
             since: dt.datetime | None = None, until: dt.datetime | None = None, side: str | None = None,
-            asset: str | None = None, lane: str | None = None, result: str | None = None) -> dict:
+            asset: str | None = None, lane: str | None = None, result: str | None = None,
+            include_voided: bool = False) -> dict:
     """Closed trades with realized P&L (after fees), open positions with unrealized P&L at the latest stored price,
-    and the totals of the filtered set. The FIFO runs over the whole book so a filter never breaks a lot."""
+    and the totals of the filtered set. The FIFO runs over the whole book so a filter never breaks a lot. Voided
+    trades never count; with include_voided they are listed apart ("voided"), each with when and why."""
     db = request.app.state.db
     all_rows = db.fetch_all(_TRADE_SQL + " ORDER BY t.at, t.id")
     by_id = {r["id"]: r for r in all_rows}
@@ -258,7 +388,12 @@ def history(request: Request, sub: str = OwnerSub, book: str | None = None, tick
                            "opened_trade_ids": list(c.opened_trade_ids), "idea_id": idea_id,
                            "memo_id": memo_id, "attachments": t.get("attachments")})
     totals = {k: _dec(v) if isinstance(v, Decimal) else v for k, v in ledger.totals(closed).items()}
-    return {"closed": closed_out, "open": open_out, "totals": totals}
+    out: dict[str, Any] = {"closed": closed_out, "open": open_out, "totals": totals}
+    if include_voided:
+        where_v = (where + " AND " if where else " WHERE ") + "t.voided_at IS NOT NULL"
+        out["voided"] = [_row(r) for r in db.fetch_all(_ALL_TRADES_SQL + where_v + " ORDER BY t.at DESC, t.id DESC",
+                                                       params)]
+    return out
 
 
 # ── portfolio ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -285,7 +420,7 @@ def _day_pnls(db: Any, trades: list[Trade], positions: list[ledger.Position],
 def portfolio(request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     books = db.fetch_all("SELECT id, kind, name FROM books ORDER BY id")
-    all_rows = db.fetch_all("SELECT * FROM trades ORDER BY at, id")
+    all_rows = db.fetch_all("SELECT * FROM live_trades ORDER BY at, id")
     trades = [Trade.from_row(r) for r in all_rows]
     _, positions = ledger.settle(trades)
     recent = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)      # a ticker sold out in its latest session still counts
@@ -344,8 +479,8 @@ def position(book: str, ticker: str, request: Request, sub: str = OwnerSub) -> d
     db = request.app.state.db
     t = ticker.strip().upper()
     book_id = _book_id(db, book)
-    rows = db.fetch_all("SELECT * FROM trades WHERE book_id = %s AND ticker = %s AND asset = 'stock' ORDER BY at, id",
-                        (book_id, t))
+    rows = db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s AND ticker = %s AND asset = 'stock' "
+                        "ORDER BY at, id", (book_id, t))
     if not rows:
         raise HTTPException(status_code=404, detail=f"no {t} trades in the {book} book")
     trades = [Trade.from_row(r) for r in rows]
@@ -357,7 +492,7 @@ def position(book: str, ticker: str, request: Request, sub: str = OwnerSub) -> d
     realized = ledger.money(sum((c.pnl for c in closed), Decimal(0)))
     unrealized = pos.unrealized(price) if pos else ledger.money(Decimal(0))
     thesis = db.fetch_one(
-        "SELECT i.id AS idea_id, i.lane, i.module, i.entry, i.stop, i.target, i.status, s.reason FROM trades t "
+        "SELECT i.id AS idea_id, i.lane, i.module, i.entry, i.stop, i.target, i.status, s.reason FROM live_trades t "
         "JOIN ideas i ON i.id = t.idea_id JOIN signals s ON s.id = i.signal_id "
         "WHERE t.book_id = %s AND t.ticker = %s AND t.side = 'buy' ORDER BY t.at DESC, t.id DESC LIMIT 1",
         (book_id, t))

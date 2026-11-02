@@ -30,7 +30,7 @@ def _row(r: dict) -> dict:
 def _trades(db, book: str, limit: int) -> list[dict]:
     rows = db.fetch_all(
         "SELECT t.id, t.ticker, t.asset, t.side, t.quantity, t.fill, t.fees, t.at, t.note, t.option_symbol, t.lane, "
-        "t.idea_id, i.module FROM trades t JOIN books b ON b.id = t.book_id LEFT JOIN ideas i ON i.id = t.idea_id "
+        "t.idea_id, i.module FROM live_trades t JOIN books b ON b.id = t.book_id LEFT JOIN ideas i ON i.id = t.idea_id "
         "WHERE b.kind = %s ORDER BY t.at DESC, t.id DESC LIMIT %s",
         (book, limit),
     )

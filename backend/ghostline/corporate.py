@@ -40,7 +40,7 @@ CONVERTS = ("name_change", "stock_merger", "stock_and_cash_merger")         # sh
 
 def held(db: Database, book_id: int, ticker: str, before: dt.datetime) -> Decimal:
     """Shares of a stock a book held just before a moment."""
-    rows = db.fetch_all("SELECT * FROM trades WHERE book_id = %s AND ticker = %s AND asset = 'stock' AND at < %s "
+    rows = db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s AND ticker = %s AND asset = 'stock' AND at < %s "
                         "ORDER BY at, id", (book_id, ticker, before))
     _, positions = ledger.settle([Trade.from_row(r) for r in rows])
     return sum((p.quantity for p in positions), Decimal(0))

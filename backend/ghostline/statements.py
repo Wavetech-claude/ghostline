@@ -29,9 +29,9 @@ def build(db: Database, book: str, month: str) -> dict[str, Any]:
         raise LookupError(f"no book {book}")
     start, end = month_bounds(month)
     flows = db.fetch_all(
-        "SELECT amount, at, note FROM cash_flows WHERE book_id = %s AND at <= %s ORDER BY at, id", (b["id"], end)
+        "SELECT amount, at, note FROM live_cash_flows WHERE book_id = %s AND at <= %s ORDER BY at, id", (b["id"], end)
     )
-    rows = db.fetch_all("SELECT * FROM trades WHERE book_id = %s AND at <= %s ORDER BY at, id", (b["id"], end))
+    rows = db.fetch_all("SELECT * FROM live_trades WHERE book_id = %s AND at <= %s ORDER BY at, id", (b["id"], end))
     trades = [Trade.from_row(r) for r in rows]
     closed, _ = ledger.settle(trades)
     in_month = [r for r in rows if start <= r["at"] <= end]

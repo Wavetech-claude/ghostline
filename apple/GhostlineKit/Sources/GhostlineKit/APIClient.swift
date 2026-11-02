@@ -128,6 +128,10 @@ public actor APIClient {
         try await sendJSON(path, method: "PUT", body: body, authenticated: authenticated)
     }
 
+    func patch<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
+        try await sendJSON(path, method: "PATCH", body: body, authenticated: authenticated)
+    }
+
     func postRaw<T: Decodable>(_ path: String, query: [URLQueryItem], body: Data, contentType: String) async throws -> T {
         var r = try request(path, method: "POST", authenticated: true, query: query)
         r.setValue(contentType, forHTTPHeaderField: "Content-Type")

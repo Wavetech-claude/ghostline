@@ -94,7 +94,7 @@ def close_todo(todo_id: int, body: DoneIn, request: Request, sub: str = OwnerSub
     db = request.app.state.db
     if body.trade_id is not None:
         t = db.fetch_one(
-            "SELECT b.kind FROM trades t JOIN books b ON b.id = t.book_id WHERE t.id = %s", (body.trade_id,)
+            "SELECT b.kind FROM live_trades t JOIN books b ON b.id = t.book_id WHERE t.id = %s", (body.trade_id,)
         )
         if not t:
             raise HTTPException(status_code=404, detail="no such trade")
