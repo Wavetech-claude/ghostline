@@ -90,9 +90,9 @@ struct OrderRowView: View {
     }
 
     private var detail: String {
-        var parts = [order.type.replacingOccurrences(of: "_", with: "-"), order.tif.uppercased()]
+        var parts = [order.kindText, order.tif.uppercased()]
         if let l = order.limitPrice { parts.append("limit \(Show.money(l))") }
-        if let s = order.stopPrice { parts.append("stop \(Show.money(s))") }
+        if let s = order.stopPrice, order.type != "trailing_stop" { parts.append("stop \(Show.money(s))") }
         if let f = order.fillPrice { parts.append("filled at \(Show.money(f))") }
         return parts.joined(separator: " · ")
     }
@@ -139,6 +139,11 @@ struct OrderTicketView: View {
     @State private var stopPrice = ""
     @State private var stopLoss = ""
     @State private var note = ""
+    @State private var trailBy = "percent"          // a trailing stop's gap: "percent" or "amount"
+    @State private var trail = ""
+    @State private var bracket = false              // a stock buy with its two exits
+    @State private var takeProfit = ""
+    @State private var bracketStop = ""
     @State private var outcome: OrderRow?
     @State private var problem: String?
 
@@ -152,6 +157,17 @@ struct OrderTicketView: View {
             && (Decimal(string: quantity).map { $0 > 0 } ?? false)
             && (!["limit", "stop_limit"].contains(type) || (Decimal(string: limitPrice).map { $0 > 0 } ?? false))
             && (!["stop", "stop_limit"].contains(type) || (Decimal(string: stopPrice).map { $0 > 0 } ?? false))
+            && (type != "trailing_stop" || (Decimal(string: trail).map { $0 > 0 } ?? false))
+            && (!bracketShown || !bracket || bracketValid)
+    }
+
+    /// A bracket is a stock buy, market or limit.
+    private var bracketShown: Bool { asset == "stock" && side == "buy" && ["market", "limit"].contains(type) }
+
+    private var bracketValid: Bool {
+        guard let tp = Decimal(string: takeProfit), let st = Decimal(string: bracketStop), tp > st, st > 0 else { return false }
+        if type == "limit", let lim = Decimal(string: limitPrice) { return st < lim && lim < tp }
+        return true
     }
 
     var body: some View {
@@ -189,15 +205,42 @@ struct OrderTicketView: View {
                         Text("Limit").tag("limit")
                         Text("Stop").tag("stop")
                         Text("Stop Limit").tag("stop_limit")
+                        if asset == "stock" { Text("Trailing Stop").tag("trailing_stop") }
                     }
                     if ["limit", "stop_limit"].contains(type) { numberField("Limit price", $limitPrice) }
                     if ["stop", "stop_limit"].contains(type) { numberField("Stop price", $stopPrice) }
+                    if type == "trailing_stop" {
+                        Picker("Trail by", selection: $trailBy) {
+                            Text("Percent").tag("percent")
+                            Text("Dollars").tag("amount")
+                        }
+                        .pickerStyle(.segmented)
+                        numberField(trailBy == "percent" ? "Trail (%)" : "Trail ($)", $trail)
+                    }
                     Picker("Time in Force", selection: $tif) {
                         Text("Day").tag("day")
                         Text("Good Till Cancelled").tag("gtc")
                     }
                 }
-                if side == "buy" || side == "sell_to_open" {
+                if type == "trailing_stop" {
+                    Section {
+                        EmptyView()
+                    } footer: {
+                        Text("The stop follows the best price since you place it, \(side == "sell" ? "under the highest bid" : "over the lowest ask"), and never moves back. It moves on each fresh quote (about every 30 minutes in the session) and sells or buys at the market once crossed.")
+                    }
+                }
+                if bracketShown {
+                    Section {
+                        Toggle("Bracket: Add Exits", isOn: $bracket)
+                        if bracket {
+                            numberField("Take profit (limit)", $takeProfit)
+                            numberField("Stop loss (stop)", $bracketStop)
+                        }
+                    } footer: {
+                        Text("When the buy fills, two sell orders open for the same shares: a limit at the take-profit and a stop at the stop loss, good till cancelled. One filling cancels the other.")
+                    }
+                }
+                if (side == "buy" || side == "sell_to_open") && !(bracketShown && bracket) {
                     Section {
                         numberField(asset == "stock" ? "Stop loss (price)" : "Stop loss (underlying price)", $stopLoss)
                     } footer: {
@@ -250,7 +293,11 @@ struct OrderTicketView: View {
                                stopPrice: ["stop", "stop_limit"].contains(type) ? stopPrice : nil,
                                stopLoss: stopLoss.isEmpty ? nil : stopLoss,
                                optionSymbol: asset == "option" ? optionSymbol.uppercased() : nil,
-                               note: note.isEmpty ? nil : note)
+                               note: note.isEmpty ? nil : note,
+                               trailAmount: type == "trailing_stop" && trailBy == "amount" ? trail : nil,
+                               trailPercent: type == "trailing_stop" && trailBy == "percent" ? trail : nil,
+                               takeProfit: bracketShown && bracket ? takeProfit : nil,
+                               bracketStop: bracketShown && bracket ? bracketStop : nil)
         if let row = await practice.place(input) {
             outcome = row
             problem = nil

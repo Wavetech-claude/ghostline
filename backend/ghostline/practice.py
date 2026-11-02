@@ -26,7 +26,9 @@ PT = ZoneInfo("America/Los_Angeles")
 BUYING = ("buy", "buy_to_close")
 OPENING = ("buy", "sell_to_open")
 SIMULATED_BOOKS = ("practice", "ai", "options")   # the real book is placed by the owner at the broker, never here
-REPLACEABLE = ("limit", "stop", "stop_limit")       # Robinhood's rule: a pending limit or stop order, same type
+REPLACEABLE = ("limit", "stop", "stop_limit", "trailing_stop")   # a pending limit or stop order, same type
+# what an order carries beyond the basic ticket (copied by a replacement, written by every insert)
+EXTRA = ("trail_amount", "trail_percent", "water_mark", "take_profit", "bracket_stop", "parent_order_id")
 
 
 class ReplaceRefused(Exception):
@@ -66,6 +68,18 @@ def fill_price(side: str, kind: str, bid: Decimal | None, ask: Decimal | None, l
         good = (market <= limit_price) if buying else (market >= limit_price)
         return Fill(market if good else None, triggered)
     return Fill(market, triggered)
+
+
+def trail(side: str, water: Decimal | None, market: Decimal, amount: Decimal | None,
+          percent: Decimal | None) -> tuple[Decimal, Decimal]:
+    """A trailing stop's mark and stop after one more market price. A sale follows the highest bid seen and stops
+    the trail under it; a buy follows the lowest ask and stops the trail above it. The mark only moves in the order's
+    favour, so the stop never loosens."""
+    buying = side in BUYING
+    mark = market if water is None else (min(water, market) if buying else max(water, market))
+    gap = amount if amount is not None else (mark * percent / 100)
+    stop = mark + gap if buying else mark - gap
+    return mark, stop.quantize(Decimal("0.0001"))
 
 
 def next_business_day(d: dt.date, cal: Calendar = WEEKDAYS) -> dt.date:
@@ -216,10 +230,29 @@ class Practice:
         if old["status"] != "open":
             raise ReplaceRefused(f"the order is {old['status']}, not open: only an open order is replaced")
         if old["type"] not in REPLACEABLE:
-            raise ReplaceRefused("only a limit, stop or stop-limit order is replaced; cancel a market order instead")
+            raise ReplaceRefused("only a limit, stop, stop-limit or trailing stop order is replaced; "
+                                 "cancel a market order instead")
         o = {k: old[k] for k in ("book", "ticker", "asset", "side", "type", "tif", "quantity", "limit_price",
-                                 "stop_price", "stop_loss", "option_symbol", "note", "idea_id", "lane")}
+                                 "stop_price", "stop_loss", "option_symbol", "note", "idea_id", "lane", *EXTRA)}
+        if old["parent_order_id"] is not None and changes.get("quantity") not in (None, old["quantity"]):
+            raise ReplaceRefused("a bracket's exit keeps the bracket's shares: change its price, or cancel the bracket")
+        if old["type"] == "trailing_stop":
+            # a replacement is a new order: its mark starts from the latest price, like any new trailing stop
+            if changes.get("stop_price") is not None or changes.get("limit_price") is not None:
+                raise ReplaceRefused("a trailing stop sets its own stop from the trail: change the trail")
+            o["water_mark"] = o["stop_price"] = None
+            if changes.get("trail_amount") is not None:
+                o["trail_percent"] = None
+            if changes.get("trail_percent") is not None:
+                o["trail_amount"] = None
+        elif changes.get("trail_amount") is not None or changes.get("trail_percent") is not None:
+            raise ReplaceRefused("only a trailing stop has a trail")
+        legs = changes.get("take_profit") is not None or changes.get("bracket_stop") is not None
+        if legs and old["take_profit"] is None:
+            raise ReplaceRefused("only a bracket's buy has a take-profit and a stop: replace its exits one by one")
         o.update({k: v for k, v in changes.items() if v is not None})
+        if o.get("take_profit") is not None and Decimal(o["take_profit"]) <= Decimal(o["bracket_stop"]):
+            raise ReplaceRefused("the take-profit must be above the bracket's stop")
         if o["type"] in ("limit", "stop_limit") and o.get("limit_price") is None:
             raise ReplaceRefused(f"a {o['type']} order needs a limit price")
         if o["type"] in ("stop", "stop_limit") and o.get("stop_price") is None:
@@ -266,6 +299,18 @@ class Practice:
         bid = Decimal(quote["bid"]) if quote and quote.get("bid") is not None else None
         ask = Decimal(quote["ask"]) if quote and quote.get("ask") is not None else None
         qty = Decimal(o["quantity"])
+        if o.get("type") == "trailing_stop":
+            market = ask if o["side"] in BUYING else bid
+            if market is None:
+                return refuse(f"a trailing stop starts from the latest price: none stored for {o['ticker']} yet")
+            mark, stop = trail(o["side"], None, market,
+                               Decimal(o["trail_amount"]) if o.get("trail_amount") is not None else None,
+                               Decimal(o["trail_percent"]) if o.get("trail_percent") is not None else None)
+            if stop <= 0:
+                return refuse(f"the trail is larger than the price ({market}): the stop would be {stop}")
+            o["water_mark"], o["stop_price"] = mark, stop
+        if o.get("take_profit") is not None and o.get("stop_loss") is None:
+            o["stop_loss"] = o.get("bracket_stop")        # the bracket's stop is the risk check's worst case
         facts = self.facts(book_id)
         fee = self.fee()
 
@@ -345,17 +390,33 @@ class Practice:
     def _insert(conn: Any, o: dict, book_id: int, status: str, why: str | None, replaces: int | None = None) -> dict:
         return conn.execute(
             "INSERT INTO orders (book_id, ticker, asset, side, type, tif, quantity, limit_price, stop_price, "
-            "stop_loss, option_symbol, status, reason, note, idea_id, lane, replaces_order_id) VALUES (%s, %s, %s, "
-            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            "stop_loss, option_symbol, status, reason, note, idea_id, lane, replaces_order_id, trail_amount, "
+            "trail_percent, water_mark, take_profit, bracket_stop, parent_order_id) VALUES (%s, %s, %s, %s, %s, %s, "
+            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
             (book_id, o["ticker"], o["asset"], o["side"], o.get("type", "market"), o.get("tif", "day"),
              o["quantity"], o.get("limit_price"), o.get("stop_price"), o.get("stop_loss"), o.get("option_symbol"),
-             status, why, o.get("note"), o.get("idea_id"), o.get("lane"), replaces)).fetchone()
+             status, why, o.get("note"), o.get("idea_id"), o.get("lane"), replaces,
+             *(o.get(k) for k in EXTRA))).fetchone()
 
     # ── filling ──
     def try_fill(self, order: dict, quote: dict) -> bool:
         bid = Decimal(quote["bid"]) if quote.get("bid") is not None else None
         ask = Decimal(quote["ask"]) if quote.get("ask") is not None else None
-        f = fill_price(order["side"], order["type"], bid, ask,
+        kind = order["type"]
+        if kind == "trailing_stop":
+            kind = "stop"
+            market = ask if order["side"] in BUYING else bid
+            if market is not None and not order.get("triggered"):
+                mark, stop = trail(order["side"],
+                                   Decimal(order["water_mark"]) if order.get("water_mark") is not None else None,
+                                   market,
+                                   Decimal(order["trail_amount"]) if order.get("trail_amount") is not None else None,
+                                   Decimal(order["trail_percent"]) if order.get("trail_percent") is not None else None)
+                if mark != order.get("water_mark") or stop != order.get("stop_price"):
+                    self.db.execute("UPDATE orders SET water_mark = %s, stop_price = %s WHERE id = %s",
+                                    (mark, stop, order["id"]))
+                    order = {**order, "water_mark": mark, "stop_price": stop}
+        f = fill_price(order["side"], kind, bid, ask,
                        Decimal(order["limit_price"]) if order.get("limit_price") is not None else None,
                        Decimal(order["stop_price"]) if order.get("stop_price") is not None else None,
                        bool(order.get("triggered")))
@@ -363,13 +424,18 @@ class Practice:
             self.db.execute("UPDATE orders SET triggered = true WHERE id = %s", (order["id"],))
         if f.price is None:
             return False
-        self._fill(order, f.price, quote)
-        return True
+        return self._fill(order, f.price, quote)
 
-    def _fill(self, order: dict, price: Decimal, quote: dict) -> None:
+    def _fill(self, order: dict, price: Decimal, quote: dict) -> bool:
         now = dt.datetime.now(dt.UTC)
         fee = self.fee()
         with self.db.connection() as conn:
+            # still open? A pass over the open orders reads them once; a bracket exit filled earlier in the same pass
+            # may have cancelled this one since
+            still = conn.execute("SELECT status FROM orders WHERE id = %s FOR UPDATE", (order["id"],)).fetchone()
+            if not still or still["status"] != "open":
+                conn.rollback()
+                return False
             filled = (f"order {order['id']} filled at the {'ask' if order['side'] in BUYING else 'bid'} "
                       f"({quote['source']}, quote of {quote['ts'].isoformat()})")
             note = f"{order['note']} · {filled}" if order.get("note") else filled
@@ -386,7 +452,43 @@ class Practice:
                              (t["id"], proceeds, settles_at(now, Calendar.load(self.db))))
             conn.execute("UPDATE orders SET status = 'filled', filled_at = %s, fill_price = %s, trade_id = %s "
                          "WHERE id = %s", (now, price, t["id"], order["id"]))
+            if order.get("take_profit") is not None and order.get("bracket_stop") is not None:
+                self._open_exits(conn, order)
+            if order.get("parent_order_id") is not None:
+                conn.execute("UPDATE orders SET status = 'cancelled', reason = %s WHERE parent_order_id = %s "
+                             "AND id <> %s AND status = 'open'",
+                             (f"the other side of the bracket filled (order {order['id']})",
+                              order["parent_order_id"], order["id"]))
             conn.commit()
+        return True
+
+    def _open_exits(self, conn: Any, entry: dict) -> None:
+        """A bracket's buy filled: a take-profit limit and a stop, both selling the same shares, good till cancelled,
+        one cancelling the other. They are closing orders on shares the book now holds, so no risk check is due."""
+        base = {"ticker": entry["ticker"], "asset": "stock", "side": "sell", "tif": "gtc",
+                "quantity": entry["quantity"], "idea_id": entry.get("idea_id"), "lane": entry.get("lane"),
+                "parent_order_id": entry["id"]}
+        self._insert(conn, {**base, "type": "limit", "limit_price": entry["take_profit"],
+                            "note": f"take-profit of bracket order {entry['id']}"}, entry["book_id"], "open", None)
+        self._insert(conn, {**base, "type": "stop", "stop_price": entry["bracket_stop"],
+                            "note": f"stop-loss of bracket order {entry['id']}"}, entry["book_id"], "open", None)
+
+    def cancel(self, order_id: int, why: str = "cancelled by the owner") -> dict:
+        """Cancel an open order. A bracket's exit takes its sibling with it: the bracket ends as a whole."""
+        row = self.db.fetch_one("SELECT * FROM orders WHERE id = %s", (order_id,))
+        if not row:
+            raise LookupError(f"no order {order_id}")
+        if row["status"] != "open":
+            raise ReplaceRefused(f"the order is {row['status']}, not open")
+        with self.db.connection() as conn:
+            conn.execute("UPDATE orders SET status = 'cancelled', reason = %s WHERE id = %s", (why, order_id))
+            if row["parent_order_id"] is not None:
+                conn.execute("UPDATE orders SET status = 'cancelled', reason = %s WHERE parent_order_id = %s "
+                             "AND id <> %s AND status = 'open'",
+                             (f"the other side of the bracket was cancelled (order {order_id})",
+                              row["parent_order_id"], order_id))
+            conn.commit()
+        return self.db.fetch_one("SELECT * FROM orders WHERE id = %s", (order_id,))
 
     def fill_open_orders(self) -> dict:
         """Every open order against the latest stored quote for its symbol; settlements that are due are settled."""

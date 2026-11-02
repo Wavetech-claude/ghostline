@@ -98,15 +98,27 @@ public struct ReplaceInput: Encodable, Sendable, Equatable {
     public var limitPrice: String?
     public var stopPrice: String?
     public var tif: String?
+    public var trailAmount: String?
+    public var trailPercent: String?
+    public var takeProfit: String?
+    public var bracketStop: String?
 
-    public init(quantity: String? = nil, limitPrice: String? = nil, stopPrice: String? = nil, tif: String? = nil) {
+    public init(quantity: String? = nil, limitPrice: String? = nil, stopPrice: String? = nil, tif: String? = nil,
+                trailAmount: String? = nil, trailPercent: String? = nil, takeProfit: String? = nil,
+                bracketStop: String? = nil) {
         self.quantity = quantity
         self.limitPrice = limitPrice
         self.stopPrice = stopPrice
         self.tif = tif
+        self.trailAmount = trailAmount
+        self.trailPercent = trailPercent
+        self.takeProfit = takeProfit
+        self.bracketStop = bracketStop
     }
 
-    private enum CodingKeys: String, CodingKey { case quantity, limitPrice, stopPrice, tif }
+    private enum CodingKeys: String, CodingKey {
+        case quantity, limitPrice, stopPrice, tif, trailAmount, trailPercent, takeProfit, bracketStop
+    }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -114,6 +126,10 @@ public struct ReplaceInput: Encodable, Sendable, Equatable {
         try c.encodeIfPresent(limitPrice, forKey: .limitPrice)
         try c.encodeIfPresent(stopPrice, forKey: .stopPrice)
         try c.encodeIfPresent(tif, forKey: .tif)
+        try c.encodeIfPresent(trailAmount, forKey: .trailAmount)
+        try c.encodeIfPresent(trailPercent, forKey: .trailPercent)
+        try c.encodeIfPresent(takeProfit, forKey: .takeProfit)
+        try c.encodeIfPresent(bracketStop, forKey: .bracketStop)
     }
 }
 
@@ -128,8 +144,8 @@ public struct ResetResult: Codable, Sendable, Equatable {
 }
 
 public extension OrderRow {
-    /// Robinhood's rule: an open limit, stop or stop-limit order can be replaced; a market order is cancelled.
-    var isReplaceable: Bool { isOpen && ["limit", "stop", "stop_limit"].contains(type) }
+    /// An open limit, stop, stop-limit or trailing stop order can be replaced; a market order is cancelled.
+    var isReplaceable: Bool { isOpen && ["limit", "stop", "stop_limit", "trailing_stop"].contains(type) }
 }
 
 public extension APIClient {

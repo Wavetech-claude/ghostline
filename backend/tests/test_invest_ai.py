@@ -156,6 +156,10 @@ def test_copy_to_practice_at_the_same_share_and_to_real_only_after_the_lane_grad
     order = r.json()["order"]
     # the AI trade is 2,001.00 of a 9,999.00 book (20.012%); the same share of 5,000 at 100.00 is 10.006001 shares
     assert order["status"] == "filled" and D(order["quantity"]) == D("10.006001")
+    # a swing idea's copy carries its exits: a bracket at the idea's target and stop (2026-11-01)
+    assert (order["take_profit"], order["bracket_stop"]) == ("120.0000", "95.0000")
+    assert db.fetch_one("SELECT count(*) AS n FROM orders WHERE parent_order_id = %s AND status = 'open'",
+                        (order["id"],))["n"] == 2
     refused = client.post(f"/ai-trader/trades/{tid}/copy", json={"to": "real"}, headers=h)
     assert refused.status_code == 409 and "has not graduated" in refused.json()["detail"]
     _sql("UPDATE lane_graduation SET graduated = true WHERE lane = 'swing'")
@@ -198,6 +202,8 @@ def test_invest_this_splits_by_score_moves_refused_money_and_places_on_its_date(
     _sql("UPDATE invest_plans SET for_date = CURRENT_DATE - 1 WHERE id = %s", (plan["id"],))
     placed = Planner(db).place_due()["placed"][0]["orders"]
     assert placed[0]["ticker"] == "AAPL" and placed[0]["status"] == "filled"
+    o = db.fetch_one("SELECT take_profit, bracket_stop FROM orders WHERE id = %s", (placed[0]["order"],))
+    assert (o["take_profit"], o["bracket_stop"]) == (D("120"), D("99"))      # the swing idea's target and stop
     assert client.get("/invest", headers=h).json()["plans"][0]["status"] == "placed"
     assert client.post(f"/invest/{plan['id']}/approve", json={"to": "practice"}, headers=h).status_code == 409
 
