@@ -2,6 +2,22 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.30.0] — unreleased
+
+- **Discover** (the Search tab, before you type): what moved, where, and in which theme. Every row opens the stock page.
+  - **Movers:** top gainers, losers and most active for the day, the week or the month; stocks, ETFs or both; one
+    industry or all. Today's whole-market lists are live from Alpaca; the week, the month and any slice come from
+    the whole market's closing prices. Warrants, rights and units are left out, and so are stocks under $5 (a switch
+    shows them) and anything trading under $1M a day.
+  - **Sectors:** the eleven sectors through their Select Sector SPDR funds (XLK technology, XLF financials...), day,
+    week or month.
+  - **Industries:** the median move of each industry's stocks (Finnhub's industry of every stock trading $5M a day or
+    more, filled a slice each night); tap one to see its movers.
+  - **Themes**, chosen by hand: space, semiconductors, construction and homebuilders, clean energy, banks, biotech, oil
+    and gas, software and cybersecurity, gold, real estate, electric vehicles: their funds and the leading stocks of
+    their industries.
+- The whole market's daily file is now fetched every day, so Friday's session arrives on Saturday, not Monday.
+
 ## [0.29.0] — unreleased
 
 - **Trailing stop** in the practice account (stocks): set the trail in dollars or percent. The stop follows the best

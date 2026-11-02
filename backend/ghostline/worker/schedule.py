@@ -33,7 +33,8 @@ PT = "America/Los_Angeles"
 PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "pull_ticker_reference", "pull_market_daily",
          "build_universe", "pull_eps_history",
          "pull_bars", "pull_corporate_actions",
-         "pull_news_earnings", "pull_fundamentals", "pull_analysts", "pull_chains", "pull_quotes")
+         "pull_news_earnings", "pull_fundamentals", "pull_analysts", "pull_chains", "pull_quotes", "pull_movers",
+         "pull_industries")
 
 
 def register(
@@ -106,7 +107,8 @@ def register(
         # search: Massive's ticker types weekly; the whole market's daily file before the universe reads it
         ("pull_ticker_reference", j.pull_ticker_reference, CronTrigger(day_of_week="sun", hour=4, minute=45,
                                                                       timezone=PT)),
-        ("pull_market_daily", j.pull_market_daily, CronTrigger(day_of_week="mon-fri", hour=4, minute=55, timezone=PT)),
+        # every day: Saturday's run brings Friday's session; a run with nothing missing makes no call
+        ("pull_market_daily", j.pull_market_daily, CronTrigger(hour=4, minute=55, timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_eps_history", j.pull_eps_history, CronTrigger(day_of_week="mon-fri", hour=5, minute=10, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),
@@ -120,6 +122,9 @@ def register(
         ("pull_chains", j.pull_chains, CronTrigger(day_of_week="mon-fri", hour=6, minute=12, timezone=PT)),
         ("scan_ideas", scan_ideas, CronTrigger(day_of_week="mon-fri", hour=6, minute=20, timezone=PT)),
         ("pull_quotes", j.pull_quotes, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="0,30", timezone=PT)),
+        # discover: the live movers through the session; each traded stock's industry, a slice a night
+        ("pull_movers", j.pull_movers, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="10,40", timezone=PT)),
+        ("pull_industries", j.pull_industries, CronTrigger(hour=2, minute=30, timezone=PT)),
         # practice: fill open orders on the fresh quotes, then close the session (day orders, settlement, expiries)
         (
             "fill_orders",
