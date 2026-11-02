@@ -258,8 +258,10 @@ def test_the_chain_pull_stores_the_expiry_nearest_38_days_for_stocks_the_owner_w
     db.close()
 
 
-def test_the_chain_pull_stops_when_tradier_is_not_configured(fresh_db, monkeypatch, keys):
+def test_the_chain_pull_stops_when_no_option_source_is_configured(fresh_db, monkeypatch, keys):
+    # without Tradier the pull asks Alpaca (test_alpaca_options.py); with neither key it makes no call at all
     monkeypatch.delenv("GHOSTLINE_KEY_TRADIER")
+    monkeypatch.delenv("GHOSTLINE_KEY_ALPACA")
     db = Database(settings())
     db.execute("INSERT INTO watchlist (ticker) VALUES ('AAPL'), ('MSFT')")
     http, seen = fake_http()

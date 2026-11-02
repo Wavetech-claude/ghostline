@@ -48,6 +48,7 @@ REPORT_HOURS = ("bmo", "amc", "dmh")             # Finnhub: before the open, aft
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
 TickerRef = tuple[str, str, str | None, str | None]   # Massive's ticker list: ticker, name, type, CIK
 MASSIVE_V3 = "https://api.massive.com/v3"           # Massive's reference data (ticker names and types)
+ALPACA_OPTIONS = "https://data.alpaca.markets/v1beta1/options"   # option snapshots, feed "indicative" (free)
 ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
 ACTION_KINDS = (("forward_split", "forward_splits"), ("reverse_split", "reverse_splits"),
                 ("cash_dividend", "cash_dividends"), ("name_change", "name_changes"), ("stock_merger", "stock_mergers"),
@@ -126,6 +127,14 @@ def _rfc3339(d: dt.date | dt.datetime) -> str:
     if isinstance(d, dt.datetime):
         return d.astimezone(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return d.isoformat()
+
+
+def _alpaca_option(symbol: str, snap: dict, contract: dict) -> dict:
+    """An Alpaca contract and its snapshot as one chain row. A bid or ask of 0 means none (Alpaca writes 0)."""
+    q, t, day = snap.get("latestQuote") or {}, snap.get("latestTrade") or {}, snap.get("dailyBar") or {}
+    return {"symbol": symbol, "bid": q.get("bp") or None, "ask": q.get("ap") or None, "last": t.get("p"),
+            "volume": day.get("v"), "open_interest": contract.get("open_interest"),
+            "open_interest_date": contract.get("open_interest_date"), "greeks": {}}
 
 
 class Source:
@@ -221,6 +230,72 @@ class Alpaca(Source):
             token = j.get("next_page_token")
             if not token:
                 break
+        return out
+
+    # ── options, while Tradier waits (checked live 2026-11-01) ─────────────────────────────────────────────────
+    # The contract list (trading API) gives expiry, strike, type and open interest dated the day before; the free
+    # "indicative" snapshots give each contract's latest quote, trade and daily bar, but no Greeks or IV: those are
+    # computed (market/greeks.py). Indicative prices are Alpaca's estimate, not the exchanges' own quote.
+
+    def option_contracts(self, ticker: str, start: dt.date, end: dt.date, kind: str | None = None) -> list[dict]:
+        """Every active contract of `ticker` expiring from start to end, every page."""
+        out: list[dict] = []
+        token = None
+        for _ in range(MAX_PAGES):
+            params = {"underlying_symbols": ticker, "expiration_date_gte": start.isoformat(),
+                      "expiration_date_lte": end.isoformat(), "status": "active", "limit": 10000}
+            if kind:
+                params["type"] = kind
+            if token:
+                params["page_token"] = token
+            j = self.fetch(TRADING + "/options/contracts", params=params, headers=self._headers())
+            out += j.get("option_contracts") or []
+            token = j.get("next_page_token")
+            if not token:
+                break
+        return out
+
+    def option_snapshots(self, ticker: str, expiry: dt.date, kind: str | None = None) -> dict[str, dict]:
+        """The indicative snapshot of every contract of one expiry, every page: OCC symbol → snapshot."""
+        out: dict[str, dict] = {}
+        token = None
+        for _ in range(MAX_PAGES):
+            params = {"feed": "indicative", "expiration_date": expiry.isoformat(), "limit": 1000}
+            if kind:
+                params["type"] = kind
+            if token:
+                params["page_token"] = token
+            j = self.fetch(f"{ALPACA_OPTIONS}/snapshots/{ticker}", params=params, headers=self._headers())
+            out.update(j.get("snapshots") or {})
+            token = j.get("next_page_token")
+            if not token:
+                break
+        return out
+
+    def option_chain(self, ticker: str, expiry: dt.date) -> list[dict]:
+        """One expiry's chain in the shape a Tradier chain has (symbol, bid, ask, last, volume, open_interest,
+        greeks), so the same parser stores either; greeks stay empty until market/greeks.py fills them."""
+        contracts = {c["symbol"]: c for c in self.option_contracts(ticker, expiry, expiry)}
+        snaps = self.option_snapshots(ticker, expiry)
+        return [_alpaca_option(sym, snaps.get(sym) or {}, contracts.get(sym) or {})
+                for sym in sorted(set(contracts) | set(snaps))]
+
+    def option_expirations(self, ticker: str, start: dt.date, end: dt.date) -> list[dt.date]:
+        """The expiries from start to end, from the put contracts (every expiry lists puts)."""
+        return sorted({d for c in self.option_contracts(ticker, start, end, "put")
+                       if (d := _date(c.get("expiration_date")))})
+
+    def option_quotes(self, symbols: list[str]) -> list[Quote]:
+        """Latest indicative quotes for option contracts by OCC symbol (a practice position's price)."""
+        out: list[Quote] = []
+        for i in range(0, len(symbols), 100):
+            j = self.fetch(f"{ALPACA_OPTIONS}/snapshots", headers=self._headers(),
+                           params={"symbols": ",".join(symbols[i:i + 100]), "feed": "indicative"})
+            for sym, s in (j.get("snapshots") or {}).items():
+                q, t = s.get("latestQuote") or {}, s.get("latestTrade") or {}
+                ts = _stamp(q.get("t")) or _stamp(t.get("t"))
+                if ts:
+                    out.append(Quote(sym, dec(q.get("bp")), dec(q.get("ap")), dec(t.get("p")), ts, delayed=True))
         return out
 
     def quotes(self, tickers: list[str]) -> list[Quote]:

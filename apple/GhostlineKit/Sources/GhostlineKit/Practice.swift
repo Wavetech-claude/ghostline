@@ -100,6 +100,7 @@ public struct Expirations: Codable, Sendable, Equatable {
     public let expirations: [String]
     public let configured: Bool
     public let reason: String?
+    public let source: String?         // "tradier", "alpaca" or "stored"
 }
 
 public struct OptionRow: Codable, Sendable, Equatable, Identifiable {
@@ -130,6 +131,14 @@ public struct OptionChain: Codable, Sendable, Equatable {
     public let available: String
     public let book: String
     public let options: [OptionRow]
+    public let indicative: Bool?       // Alpaca's free feed: its estimate of the price, IV and delta computed
+    public let note: String?
+
+    /// The line under the expiry: where the prices come from, and for Alpaca that they are indicative.
+    public var sourceLine: String {
+        let name = source == "alpaca" ? "indicative (Alpaca)" : source == "tradier" ? "Tradier" : source
+        return "\(name) · as of \(Stamp.short(asOf))"
+    }
 
     public var puts: [OptionRow] { options.filter { $0.kind == "put" } }
     public var calls: [OptionRow] { options.filter { $0.kind == "call" } }

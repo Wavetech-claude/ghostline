@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.28.0] — unreleased
+
+- Option chains work without Tradier. Until its key is set, the chains for sell-put ideas, options practice and the
+  Options Chain screen come from Alpaca's free options feed: each contract's latest quote and trade, and its open
+  interest (dated the day before). Tradier stays first the moment its key is in.
+- Alpaca's free option prices are **indicative**: its estimate, not the exchanges' own quote. The chain says so
+  ("indicative (Alpaca)"), and the feed gives no implied volatility or delta, so Ghostline computes both from each
+  option's mid price with Black–Scholes. A price Black–Scholes cannot match is left without them, and the sell-put
+  module then uses its 5-15% under the price rule instead of delta.
+- Your practice puts are priced from the same feed when Tradier is not there, so their value and the risk checks keep
+  moving.
+- Production asks Alpaca; staging shows production's stored chains, as it does for every other price.
+
 ## [0.27.0] — unreleased
 
 - **Search as you type, Robinhood style.** Typing "n" lists the popular N stocks first (Nvidia, Netflix, Nike), and part

@@ -9,10 +9,22 @@ from typing import Any
 import httpx
 
 from ghostline.db import Database
-from ghostline.market import NotConfigured, RateLimited, store, utcnow
+from ghostline.market import NotConfigured, RateLimited, greeks, store, utcnow
 from ghostline.market.calendar import Calendar
 from ghostline.market.limits import Limiter
-from ghostline.market.sources import ALL, FMP, FRED, GDELT, Alpaca, Edgar, Finnhub, Massive, Tradier
+from ghostline.market.sources import (
+    ALL,
+    FMP,
+    FRED,
+    GDELT,
+    Alpaca,
+    Edgar,
+    Finnhub,
+    Massive,
+    Tradier,
+    _alpaca_option,
+    configured,
+)
 
 logger = logging.getLogger("ghostline.jobs")
 
@@ -116,11 +128,17 @@ class Jobs:
         tradier: Tradier = self.sources["tradier"]
         quotes = self._call("tradier", "quotes", tradier.quotes, tickers + store.tracked_option_symbols(self.db))
         source = "tradier"
+        saved = 0
         if not quotes:
             alpaca: Alpaca = self.sources["alpaca"]
             quotes = self._call("alpaca", "quotes", alpaca.quotes, tickers)
             source = "alpaca"
-        return {"quotes": store.save_quotes(self.db, quotes, source, utcnow()) if quotes else 0, "source": source}
+            options = store.tracked_option_symbols(self.db)
+            if options:                        # without Tradier, the option positions' prices come from Alpaca too
+                got = self._call("alpaca", "option-quotes", alpaca.option_quotes, options)
+                saved += store.save_quotes(self.db, got, "alpaca", utcnow()) if got else 0
+        saved += store.save_quotes(self.db, quotes, source, utcnow()) if quotes else 0
+        return {"quotes": saved, "source": source}
 
     def pull_news_earnings(self) -> dict:
         finnhub: Finnhub = self.sources["finnhub"]
@@ -332,7 +350,10 @@ class Jobs:
 
     def pull_chains(self) -> dict:
         """Before the scan: for every stock the owner would happily own, the expiry 30 to 45 days out nearest 38
-        days, its whole chain stored. The sell-puts module reads only stored chains."""
+        days, its whole chain stored. The sell-puts module reads only stored chains. Tradier (the owner's account)
+        when its key is set; until then Alpaca's free indicative feed, with IV and delta computed."""
+        if not configured().get("tradier") and configured().get("alpaca"):
+            return self._pull_chains_alpaca()
         tradier: Tradier = self.sources["tradier"]
         today = dt.date.today()
         out: dict[str, Any] = {"tickers": 0, "options": 0, "no_expiry": []}
@@ -349,6 +370,30 @@ class Jobs:
             if raw:
                 out["options"] += len(store.save_chain(self.db, raw, utcnow()))
                 out["tickers"] += 1
+        return out
+
+    def _pull_chains_alpaca(self) -> dict:
+        alpaca: Alpaca = self.sources["alpaca"]
+        today = dt.date.today()
+        out: dict[str, Any] = {"tickers": 0, "options": 0, "no_expiry": [], "source": "alpaca"}
+        for ticker in store.put_candidates(self.db):
+            puts = self._call("alpaca", "option-contracts", alpaca.option_contracts, ticker,
+                              today + dt.timedelta(days=PUT_DTE[0]), today + dt.timedelta(days=PUT_DTE[1]), "put")
+            if puts is None:
+                break                          # limited or failing: the next tickers would be refused too
+            fits = sorted({d for c in puts if (d := dt.date.fromisoformat(str(c.get("expiration_date"))[:10]))})
+            if not fits:
+                out["no_expiry"].append(ticker)
+                continue
+            expiry = min(fits, key=lambda d: abs((d - today).days - 38))
+            snaps = self._call("alpaca", "option-snapshots", alpaca.option_snapshots, ticker, expiry, "put")
+            if not snaps:
+                continue
+            oi = {c["symbol"]: c for c in puts if str(c.get("expiration_date"))[:10] == expiry.isoformat()}
+            raw = [_alpaca_option(sym, s, oi.get(sym) or {}) for sym, s in sorted(snaps.items())]
+            greeks.fill(raw, store.spot_of(self.db, ticker), today)
+            out["options"] += len(store.save_chain(self.db, raw, utcnow(), "alpaca"))
+            out["tickers"] += 1
         return out
 
     def pull_fundamentals(self) -> dict:

@@ -29,6 +29,15 @@ import Testing
         """#
         let c = try GhostlineJSON.decoder().decode(OptionChain.self, from: Data(json.utf8))
         #expect(c.puts.count == 1 && c.calls.count == 1 && c.puts[0].covered && c.puts[0].collateral == "1000")
+        #expect(c.indicative == nil && c.sourceLine.hasPrefix("Tradier · as of "))
+    }
+
+    @Test func anAlpacaChainSaysItsPricesAreIndicative() throws {
+        let json = #"{"ticker":"X","expiry":"2026-12-04","configured":true,"reason":null,"source":"alpaca","indicative":true,"note":"indicative (Alpaca): estimate","as_of":"2026-11-01T10:00:00+00:00","available":"0.00","book":"practice","options":[]}"#
+        let c = try GhostlineJSON.decoder().decode(OptionChain.self, from: Data(json.utf8))
+        #expect(c.indicative == true && c.sourceLine.hasPrefix("indicative (Alpaca) · as of ") && c.note != nil)
+        let e = try GhostlineJSON.decoder().decode(Expirations.self, from: Data(#"{"ticker":"X","expirations":["2026-12-04"],"configured":true,"reason":null,"source":"alpaca","indicative":true}"#.utf8))
+        #expect(e.source == "alpaca" && e.expirations.count == 1)
     }
 }
 
