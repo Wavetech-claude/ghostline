@@ -27,6 +27,7 @@ from ghostline.learning import Learning, weekly_digest
 from ghostline.market.calendar import NEW_YORK, Calendar
 from ghostline.market.jobs import Jobs
 from ghostline.practice import Practice
+from ghostline.recurring import Recurring
 
 PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
@@ -142,6 +143,8 @@ def register(
         ("invest_place", planner.place_due, CronTrigger(day_of_week="mon-fri", hour=6, minute=35, timezone=PT)),
         ("ai_entries", ai.run_entries, CronTrigger(day_of_week="mon-fri", hour=6, minute=40, timezone=PT)),
         ("options_entries", options.run_entries, CronTrigger(day_of_week="mon-fri", hour=6, minute=45, timezone=PT)),
+        # recurring practice buys: each plan due today, once, on the 06:30 quotes (a closed day moves to the next)
+        ("recurring_buys", Recurring(db).run_due, CronTrigger(day_of_week="mon-fri", hour=6, minute=50, timezone=PT)),
         ("ai_exits", exits, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="5,35", timezone=PT)),
         ("alerts_check", alerts_check, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="6,36", timezone=PT)),
         # phase 7: settle and learn after the close; on Sunday the test set, then the digest
