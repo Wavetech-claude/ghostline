@@ -48,13 +48,26 @@ struct WatchlistView: View {
                 Button { adding = true } label: { Label("Add Ticker", systemImage: "plus") }
             }
         }
-        .alert("Watch a Ticker", isPresented: $adding) {
-            TextField("Ticker", text: $newTicker)
+        .sheet(isPresented: $adding) {
+            NavigationStack {
+                Form {
+                    TickerField(title: "Ticker or company", ticker: $newTicker)
+                }
+                .navigationTitle("Watch a Ticker")
                 #if os(iOS)
-                .textInputAutocapitalization(.characters)
+                .navigationBarTitleDisplayMode(.inline)
                 #endif
-            Button("Add") { Task { await add() } }
-            Button("Cancel", role: .cancel) { newTicker = "" }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { newTicker = ""; adding = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Add") { adding = false; Task { await add() } }
+                            .disabled(newTicker.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
         }
         .task { await load() }
         .refreshable { await load() }

@@ -30,7 +30,8 @@ from ghostline.practice import Practice
 
 PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
-PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "build_universe", "pull_eps_history",
+PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "pull_ticker_reference", "pull_market_daily",
+         "build_universe", "pull_eps_history",
          "pull_bars", "pull_corporate_actions",
          "pull_news_earnings", "pull_fundamentals", "pull_analysts", "pull_chains", "pull_quotes")
 
@@ -102,6 +103,10 @@ def register(
         ("pull_macro", j.pull_macro, CronTrigger(hour=5, minute=0, timezone=PT)),
         ("pull_tickers", j.pull_tickers, CronTrigger(hour=4, minute=40, timezone=PT)),
         ("pull_tone", j.pull_tone, CronTrigger(hour="0-4", minute="0,30", timezone=PT)),
+        # search: Massive's ticker types weekly; the whole market's daily file before the universe reads it
+        ("pull_ticker_reference", j.pull_ticker_reference, CronTrigger(day_of_week="sun", hour=4, minute=45,
+                                                                      timezone=PT)),
+        ("pull_market_daily", j.pull_market_daily, CronTrigger(day_of_week="mon-fri", hour=4, minute=55, timezone=PT)),
         ("build_universe", j.build_universe, CronTrigger(day_of_week="mon-fri", hour=5, minute=5, timezone=PT)),
         ("pull_eps_history", j.pull_eps_history, CronTrigger(day_of_week="mon-fri", hour=5, minute=10, timezone=PT)),
         ("pull_bars", j.pull_bars, CronTrigger(hour=5, minute=15, timezone=PT)),

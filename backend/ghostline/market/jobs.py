@@ -20,6 +20,8 @@ MACRO_SERIES = ("DGS10", "DGS2", "CPIAUCSL", "DEXINUS", "UNRATE", "FEDFUNDS")   
 # GDELT world news tone for the brief's backdrop (no key): one topic per run of pull_tone, see there
 TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
 PUT_DTE = (30, 45)
+MARKET_DAILY_SESSIONS = 23     # the whole-market file kept filled: 20 sessions for popularity, a month for movers
+MARKET_DAILY_KEEP_DAYS = 100   # calendar days of the whole-market file kept (about 70 sessions)
 ANALYST_FRESH_DAYS = 7         # analysts' views move slowly: each stock is asked at most once a week per source
 ANALYST_FMP_CAP = 60           # FMP calls one morning run may spend on analysts (2 a stock) of the day's 250
 ANALYST_FMP_RESERVE = 200      # a stock page opened on demand asks FMP only below this many calls today
@@ -206,12 +208,60 @@ class Jobs:
         store.mark_analyst_pull(self.db, ticker, "fmp", int(bool(grades)) + int(bool(targets)))
         return True
 
+    def pull_market_daily(self, today: dt.date | None = None, sessions: int = MARKET_DAILY_SESSIONS) -> dict:
+        """Massive's whole-market daily file (close and volume of every ticker, one call a session) for the last
+        `sessions` sessions, each fetched once, newest first, paced at Massive's 5 calls a minute. The first run fills
+        about a month; later runs add the newest session. Then old sessions are pruned and search's popularity (the
+        20-session average dollar volume) is refreshed."""
+        today = today or dt.date.today()
+        cal = Calendar.load(self.db)
+        wanted, day = [], today
+        while len(wanted) < sessions:
+            day = cal.previous_session(day)
+            wanted.append(day)
+        have = store.market_days(self.db)
+        massive: Massive = self.sources["massive"]
+        out: dict[str, Any] = {"sessions": 0, "rows": 0, "stopped": None}
+        for day in wanted:
+            if day in have:
+                continue
+            grouped = self._call("massive", "grouped-daily", massive.grouped_daily, day)
+            if grouped is None:
+                out["stopped"] = day.isoformat()     # refused or failed: the next run carries on from here
+                break
+            out["rows"] += store.save_market_daily(self.db, day, grouped, "massive", utcnow())
+            out["sessions"] += 1
+        store.prune_market_daily(self.db, today - dt.timedelta(days=MARKET_DAILY_KEEP_DAYS))
+        out["popular"] = store.refresh_popularity(self.db)
+        return out
+
+    def pull_ticker_reference(self) -> dict:
+        """Massive's list of active US tickers (about 13 pages, paced): each ticker's type, so search can leave out
+        warrants, rights and units and keep ETFs, and the names of tickers the SEC's list lacks (most ETFs). Then the
+        tickers no list typed are typed by their symbol."""
+        massive: Massive = self.sources["massive"]
+        out = {"tickers": 0, "pages": 0, "complete": False}
+        cursor = None
+        for _ in range(40):                         # 40,000 tickers at most: the list has about 13,000
+            page = self._call("massive", "reference/tickers", massive.ticker_page, cursor)
+            if page is None:
+                break
+            rows, cursor = page
+            out["tickers"] += store.save_ticker_reference(self.db, rows, "massive", utcnow())
+            out["pages"] += 1
+            if not cursor:
+                out["complete"] = True
+                break
+        out["typed_by_symbol"] = store.mark_suffix_kinds(self.db)
+        return out
+
     def build_universe(self, day: dt.date | None = None, size: int = 50) -> dict:
-        """One Massive grouped-daily pull of the whole market: the most traded names (by dollar volume) above $10
-        that moved at least 2% that day become today's scan universe, beside the tracked tickers."""
+        """The whole market's day (from the stored daily file, else one Massive call): the most traded names (by
+        dollar volume) above $10 that moved at least 2% that day become today's scan universe, beside the tracked
+        tickers."""
         massive: Massive = self.sources["massive"]
         day = day or Calendar.load(self.db).previous_session(dt.date.today())
-        grouped = self._call("massive", "grouped-daily", massive.grouped_daily, day)
+        grouped = store.market_day(self.db, day) or self._call("massive", "grouped-daily", massive.grouped_daily, day)
         if not grouped:
             return {"universe": 0, "reason": "no grouped pull"}
         rows = []

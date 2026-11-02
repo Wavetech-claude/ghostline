@@ -90,11 +90,7 @@ struct AddAlertSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Ticker", text: $ticker)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.characters)
-                    #endif
-                    .autocorrectionDisabled()
+                TickerField(title: "Ticker", ticker: $ticker)
                 Picker("When", selection: $kind) {
                     Text("Price Goes Above").tag("above")
                     Text("Price Goes Below").tag("below")

@@ -56,11 +56,7 @@ struct TradeFormView: View {
                     }
                 }
                 Section {
-                    TextField("Ticker", text: $ticker)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.characters)
-                        #endif
-                        .autocorrectionDisabled()
+                    TickerField(title: "Ticker", ticker: $ticker)
                     if asset == "option" {
                         TextField("Option symbol (OCC)", text: $optionSymbol).autocorrectionDisabled()
                     }

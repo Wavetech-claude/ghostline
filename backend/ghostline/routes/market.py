@@ -41,9 +41,13 @@ def _fetch_on_demand(request: Request, ticker: str) -> None:
 
 
 @router.get("/market/search")
-def search(request: Request, q: str = Query(min_length=1, max_length=40), sub: str = OwnerSub) -> dict:
-    rows = store.search_tickers(request.app.state.db, q)
-    return {"results": [{"ticker": r["ticker"], "name": r["name"], "watched": bool(r["watched"])} for r in rows]}
+def search(request: Request, q: str = Query(min_length=1, max_length=40), limit: int = Query(default=20, ge=1, le=50),
+           all: bool = Query(default=False), sub: str = OwnerSub) -> dict:  # noqa: A002 — the query parameter's name
+    """Search as you type: ticker or name-word prefix; held and watched first, then the exact ticker, then the most
+    traded. `all` also lists warrants, rights and units."""
+    rows = store.search_tickers(request.app.state.db, q, limit=limit, include_all=all)
+    return {"results": [{"ticker": r["ticker"], "name": r["name"], "watched": bool(r["watched"]),
+                         "held": bool(r["held"]), "kind": r["kind"]} for r in rows]}
 
 
 def _now() -> dt.datetime:

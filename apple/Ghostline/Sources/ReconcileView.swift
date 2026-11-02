@@ -284,10 +284,7 @@ struct StatementSheet: View {
                 Section {
                     ForEach(holdings.indices, id: \.self) { i in
                         HStack {
-                            TextField("Ticker", text: $holdings[i].ticker)
-                                #if os(iOS)
-                                .textInputAutocapitalization(.characters)
-                                #endif
+                            TickerField(title: "Ticker", ticker: $holdings[i].ticker, limit: 4)
                             TextField("Shares", text: $holdings[i].quantity).multilineTextAlignment(.trailing)
                                 #if os(iOS)
                                 .keyboardType(.decimalPad)

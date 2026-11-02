@@ -54,9 +54,10 @@ def test_search_finds_by_ticker_then_prefix_then_name(client):
     h = _h(client)
     _filled(client)
     got = client.get("/market/search", params={"q": "am"}, headers=h).json()["results"]
-    assert [r["ticker"] for r in got] == ["AMD", "AMZN"]                      # ticker prefixes, shortest first
+    assert [r["ticker"] for r in got] == ["AMD", "AMZN"]                      # ticker prefixes; no volume yet, so by ticker
     got = client.get("/market/search", params={"q": "AMD"}, headers=h).json()["results"]
-    assert got[0] == {"ticker": "AMD", "name": "ADVANCED MICRO DEVICES INC", "watched": False}
+    assert got[0] == {"ticker": "AMD", "name": "ADVANCED MICRO DEVICES INC", "watched": False, "held": False,
+                      "kind": None}
     got = client.get("/market/search", params={"q": "nvidia"}, headers=h).json()["results"]
     assert [r["ticker"] for r in got] == ["NVDA"]                             # by name, any case
     assert client.get("/market/search", params={"q": ""}, headers=h).status_code == 422

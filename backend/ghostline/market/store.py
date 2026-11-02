@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -366,17 +368,103 @@ def save_tickers(db: Database, rows: list[tuple[str, str, str | None]], source: 
     return len(rows)
 
 
-def search_tickers(db: Database, q: str, limit: int = 20) -> list[dict]:
-    """Stocks by ticker or company name: the exact ticker first, then ticker prefixes (shortest first), then names
-    that contain the words, each marked when the owner watches it."""
+HIDDEN_KINDS = ("WARRANT", "RIGHT", "UNIT")      # left out of search unless asked for
+
+
+def search_tickers(db: Database, q: str, limit: int = 20, include_all: bool = False) -> list[dict]:
+    """Search as you type, Robinhood style. A stock matches when its ticker starts with the text or a word of its name
+    does ("n" finds Nvidia, Netflix and Nike; "net" finds Netflix). Order: what the owner holds or watches, then the
+    exact ticker, then the most traded (20-day average dollar volume), then the ticker. Warrants, rights and units are
+    left out unless `include_all`; ETFs are in."""
     q = q.strip()
-    like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = q.upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    word = r"\m" + re.escape(q)                     # \m: the start of a word, in PostgreSQL's regular expressions
     return db.fetch_all(
-        "SELECT t.ticker, t.name, (w.ticker IS NOT NULL) AS watched FROM tickers t "
-        "LEFT JOIN watchlist w ON w.ticker = t.ticker "
-        "WHERE t.ticker ILIKE %s OR t.name ILIKE %s "
-        "ORDER BY (t.ticker = upper(%s)) DESC, (t.ticker ILIKE %s) DESC, length(t.ticker), t.ticker LIMIT %s",
-        (like + "%", "%" + like + "%", q, like + "%", limit))
+        "SELECT t.ticker, t.name, t.kind, (w.ticker IS NOT NULL) AS watched, (p.ticker IS NOT NULL) AS held "
+        "FROM tickers t LEFT JOIN watchlist w ON w.ticker = t.ticker "
+        "LEFT JOIN (SELECT DISTINCT ticker FROM positions) p ON p.ticker = t.ticker "
+        "WHERE (t.ticker LIKE %s OR t.name ~* %s) "
+        "AND (%s OR t.kind IS NULL OR NOT (t.kind = ANY(%s))) "
+        "ORDER BY (w.ticker IS NOT NULL OR p.ticker IS NOT NULL) DESC, (t.ticker = %s) DESC, "
+        "t.dollar_volume_20d DESC NULLS LAST, t.ticker LIMIT %s",
+        (like, word, include_all, list(HIDDEN_KINDS), q.upper(), limit))
+
+
+def save_ticker_reference(db: Database, rows: list[tuple[str, str, str | None, str | None]], source: str,
+                          as_of: dt.datetime) -> int:
+    """Massive's ticker list: each ticker's type, and the tickers the SEC's company list lacks (most ETFs). A name the
+    SEC gave is kept."""
+    with db.connection() as conn:
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO tickers (ticker, name, cik, kind, source, as_of) "
+                            "VALUES (%s, %s, %s, %s, %s, %s) "
+                            "ON CONFLICT (ticker) DO UPDATE SET kind = EXCLUDED.kind, "
+                            "cik = COALESCE(tickers.cik, EXCLUDED.cik)",
+                            [(t, name, cik, kind, source, as_of) for t, name, kind, cik in rows])
+        conn.commit()
+    return len(rows)
+
+
+def mark_suffix_kinds(db: Database) -> int:
+    """Tickers no list typed: a warrant, right or unit by its symbol (ABCDW, ABCDWS, ABCDR, ABCDU, ABC-WT...), only when
+    the stock it belongs to is listed too, so a real ticker ending in W, R or U is not hidden."""
+    rules = (("WARRANT", r"^[A-Z]{3,5}W$", 1), ("WARRANT", r"^[A-Z]{2,5}WS$", 2), ("RIGHT", r"^[A-Z]{3,5}R$", 1),
+             ("UNIT", r"^[A-Z]{3,5}U$", 1), ("WARRANT", r"^[A-Z]{1,5}-WTS?$", 0), ("RIGHT", r"^[A-Z]{1,5}-RTS?$", 0),
+             ("UNIT", r"^[A-Z]{1,5}-UNS?$", 0))
+    n = 0
+    for kind, pattern, cut in rules:
+        if cut:
+            n += db.execute("UPDATE tickers t SET kind = %s WHERE t.kind IS NULL AND t.ticker ~ %s AND EXISTS "
+                            "(SELECT 1 FROM tickers b WHERE b.ticker = left(t.ticker, -%s))", (kind, pattern, cut))
+        else:
+            n += db.execute("UPDATE tickers SET kind = %s WHERE kind IS NULL AND ticker ~ %s", (kind, pattern))
+    return n
+
+
+@dataclass(frozen=True)
+class DayBar:
+    """One ticker's session from the stored whole-market file."""
+    open: Decimal
+    close: Decimal
+    volume: Decimal
+
+
+def save_market_daily(db: Database, day: dt.date, grouped: dict[str, Bar], source: str, as_of: dt.datetime) -> int:
+    rows = [(day, t, b.open, b.close, b.volume, source, as_of) for t, b in grouped.items() if b.close is not None]
+    with db.connection() as conn:
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO market_daily (day, ticker, open, close, volume, source, as_of) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (day, ticker) DO UPDATE SET "
+                            "open = EXCLUDED.open, close = EXCLUDED.close, volume = EXCLUDED.volume, "
+                            "source = EXCLUDED.source, as_of = EXCLUDED.as_of", rows)
+        conn.commit()
+    return len(rows)
+
+
+def market_days(db: Database) -> set[dt.date]:
+    return {r["day"] for r in db.fetch_all("SELECT DISTINCT day FROM market_daily")}
+
+
+def market_day(db: Database, day: dt.date) -> dict[str, DayBar]:
+    rows = db.fetch_all("SELECT ticker, open, close, volume FROM market_daily WHERE day = %s", (day,))
+    return {r["ticker"]: DayBar(r["open"] or r["close"], r["close"], r["volume"]) for r in rows}
+
+
+def prune_market_daily(db: Database, before: dt.date) -> int:
+    return db.execute("DELETE FROM market_daily WHERE day < %s", (before,))
+
+
+def refresh_popularity(db: Database, sessions: int = 20) -> int:
+    """Each ticker's average dollar volume (close x volume) over the last `sessions` stored sessions; a ticker that
+    did not trade in them has none."""
+    n = db.execute("WITH d AS (SELECT DISTINCT day FROM market_daily ORDER BY day DESC LIMIT %s), "
+                   "v AS (SELECT ticker, round(avg(close * volume), 2) AS dv FROM market_daily "
+                   "WHERE day IN (SELECT day FROM d) GROUP BY ticker) "
+                   "UPDATE tickers t SET dollar_volume_20d = v.dv FROM v WHERE v.ticker = t.ticker", (sessions,))
+    db.execute("UPDATE tickers SET dollar_volume_20d = NULL WHERE dollar_volume_20d IS NOT NULL AND ticker NOT IN "
+               "(SELECT DISTINCT ticker FROM market_daily WHERE day IN (SELECT DISTINCT day FROM market_daily "
+               "ORDER BY day DESC LIMIT %s))", (sessions,))
+    return n
 
 
 def cik_of(db: Database, ticker: str) -> str | None:
