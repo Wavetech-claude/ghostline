@@ -65,6 +65,11 @@ struct PracticeAccountView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Section {
+                NavigationLink { RecurringView() } label: {
+                    Label("Recurring Buys", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
             ResetBookSection(book: "practice", name: "Practice", lastReset: practice.account?.lastReset)
         }
         .sheet(item: $replacing) { ReplaceOrderSheet(order: $0) }

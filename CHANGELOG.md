@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.31.0] — unreleased
+
+- **Recurring buys** in the practice account: "buy $50 of VOO every Monday", every trading day, every week, every
+  other week or every month (a short month uses its last day). Practice → Recurring Buys.
+- Each run is an ordinary practice market order, placed about 06:50 PT on a trading day, sized in fractional shares at
+  the ask. It passes the same risk rules and shows in History, statements and the value graph like any order. A day
+  the market is closed moves to the next session, and the run says so.
+- A run the risk rules refuse, or that finds no stored price, is recorded as skipped with the reason. Pause, resume or
+  delete a plan; a deleted plan leaves the list, and its runs stay on record.
+- Practice only: the AI trader trades only its own ideas, and its S&P 500 ghost copies deposits, not purchases, so a
+  schedule in the AI book would blur the comparison of the AI against the ghost.
+
 ## [0.30.0] — unreleased
 
 - **Discover** (the Search tab, before you type): what moved, where, and in which theme. Every row opens the stock page.
