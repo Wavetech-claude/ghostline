@@ -118,6 +118,13 @@ def _stamp(s: Any) -> dt.datetime | None:
         return None
 
 
+def _rfc3339(d: dt.date | dt.datetime) -> str:
+    """A day as YYYY-MM-DD; a moment in UTC with a Z, the form Alpaca documents."""
+    if isinstance(d, dt.datetime):
+        return d.astimezone(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return d.isoformat()
+
+
 class Source:
     name = "base"
     base_url = ""
@@ -159,9 +166,13 @@ class Alpaca(Source):
             raise NotConfigured("alpaca: GHOSTLINE_KEY_ALPACA_SECRET is not set")
         return {"APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": secret}
 
-    def bars(self, ticker: str, start: dt.date, end: dt.date, timeframe: str = "1Day") -> list[Bar]:
-        j = self.get(f"/stocks/{ticker}/bars", params={"timeframe": timeframe, "start": start.isoformat(),
-                                                       "end": end.isoformat(), "limit": 10000, "adjustment": "split",
+    def bars(self, ticker: str, start: dt.date | dt.datetime, end: dt.date | dt.datetime,
+             timeframe: str = "1Day") -> list[Bar]:
+        """Bars on the IEX feed, split-adjusted. A day, or an exact moment for intraday bars (5Min, 30Min). IEX, not
+        SIP: the free plan refuses SIP for the latest 15 minutes ("subscription does not permit querying recent SIP
+        data", checked 2026-11-01), while IEX answers live; its volume is IEX's share of the market only."""
+        j = self.get(f"/stocks/{ticker}/bars", params={"timeframe": timeframe, "start": _rfc3339(start),
+                                                       "end": _rfc3339(end), "limit": 10000, "adjustment": "split",
                                                        "feed": "iex"}, headers=self._headers())
         out = []
         for b in j.get("bars") or []:

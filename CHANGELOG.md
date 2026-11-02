@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.25.0] — unreleased
+
+- Intraday charts: **1D** shows today's session in 5-minute bars, **1W** the last five sessions in 30-minute bars, on
+  the stock page and on Advanced Chart. Regular hours only; the nights and the weekend are taken out so a week draws as
+  one line. 1D measures the change from the previous session's close and draws it as the dotted line, as Robinhood
+  does; drag across either chart to read a time.
+- The prices come from Alpaca's IEX feed, which is live; the line under the chart says so with the time
+  ("Alpaca IEX · 5-min bars · as of 1:42 PM"). The volume is IEX's share of the market only. The free plan refuses
+  the consolidated (SIP) feed for the latest 15 minutes, so IEX is the live choice.
+- A chart you open is fetched in production when it is missing or stale: at most once a minute for 1D and once every
+  five minutes for 1W while the market is open, and once more after the close. Intraday bars are kept ten days.
+- The Day's Numbers on a 1D or 1W chart add up the latest session (open, high, low, volume), not its last 5 minutes.
+
 ## [0.24.0] — unreleased
 
 - Fix a mistake without losing anything, the way the audit found real apps do it:

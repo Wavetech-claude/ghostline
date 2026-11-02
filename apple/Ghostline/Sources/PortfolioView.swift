@@ -346,11 +346,14 @@ struct BookReturnChart: View {
 struct Callout: View {
     let lines: [String]
     let day: Date
+    var withTime = false        // an intraday bar: its weekday and time
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(lines, id: \.self) { Text($0).font(.caption.weight(.semibold)).monospacedDigit() }
-            Text(day, format: .dateTime.month(.abbreviated).day().year()).font(.caption2).foregroundStyle(.secondary)
+            Text(day, format: withTime ? .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()
+                                       : .dateTime.month(.abbreviated).day().year())
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(.background.secondary, in: .rect(cornerRadius: 8))

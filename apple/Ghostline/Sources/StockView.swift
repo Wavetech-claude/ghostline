@@ -101,9 +101,10 @@ struct Holding: Identifiable {
 
 /// A day's close on the line: the date, the close as a number for the chart, and as the exact string for money.
 struct StockPoint: Identifiable {
-    let day: Date
+    let day: Date               // where it sits on the x axis
     let close: Double
     let text: String
+    var real: Date? = nil       // an intraday point: the bar's own moment (the x axis has the nights taken out)
     var id: Date { day }
 }
 
@@ -139,13 +140,22 @@ struct StockSections: View {
     let problem: String?
     @State private var picked: Date?
 
-    static let timeframes = ["1W", "1M", "3M", "6M", "1Y", "5Y"]
+    static let timeframes = ["1D", "1W", "1M", "3M", "6M", "1Y", "5Y"]
 
     private var points: [StockPoint] {
-        chart?.bars.compactMap { b in
-            guard let d = b.date, let c = Double(b.close) else { return nil }
-            return StockPoint(day: d, close: c, text: b.close)
-        } ?? []
+        guard let chart else { return [] }
+        return zip(chart.bars, chart.plotDates).compactMap { b, x in
+            guard let x, let c = Double(b.close) else { return nil }
+            return StockPoint(day: x, close: c, text: b.close, real: chart.isIntraday ? b.instant : nil)
+        }
+    }
+
+    /// What the change is measured from. A 1D chart: the previous session's close, as Robinhood does. Another
+    /// intraday chart, or a dragged point: the first point. A daily chart: the day before the last.
+    private var baseText: String? {
+        if chart?.timeframe == "1D", let prev = chart?.previousClose { return prev }
+        if pickedPoint != nil || chart?.isIntraday == true { return points.first?.text }
+        return points.count > 1 ? points[points.count - 2].text : nil
     }
 
     private var pickedPoint: StockPoint? {
@@ -162,7 +172,8 @@ struct StockSections: View {
                                            description: Text("The worker pulls daily bars for your holdings and watchlist every morning at 05:15 PT."))
                         .frame(height: 240)
                 } else {
-                    StockLine(points: points, picked: $picked)
+                    StockLine(points: points, picked: $picked,
+                              baseline: chart?.timeframe == "1D" ? chart?.previousClose.flatMap(Double.init) : nil)
                         .frame(height: 240)
                         .padding(.top, 16)
                 }
@@ -205,8 +216,7 @@ struct StockSections: View {
     // ── the price, its change, and the day or the dragged day ──
     private var header: some View {
         let shown = pickedPoint ?? points.last
-        let base = pickedPoint != nil ? points.first?.text : (points.count > 1 ? points[points.count - 2].text : nil)
-        let change = shown.flatMap { s in base.flatMap { b in Self.difference(s.text, b) } }
+        let change = shown.flatMap { s in baseText.flatMap { b in Self.difference(s.text, b) } }
         return VStack(alignment: .leading, spacing: 6) {
             Text(ticker).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
             Text(Show.money(shown?.text)).font(.system(size: 42, weight: .semibold, design: .rounded)).monospacedDigit()
@@ -218,12 +228,19 @@ struct StockSections: View {
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Show.tint(change.money).opacity(0.14), in: .capsule)
                         .foregroundStyle(Show.tint(change.money))
-                    Text(dayLabel(shown?.day)).foregroundStyle(Color.secondary)
+                    Text(shown?.real.map(timeLabel) ?? dayLabel(shown?.day)).foregroundStyle(Color.secondary)
                 }
                 .font(.subheadline.weight(.semibold))
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// An intraday point: its time, with the weekday on a 1W chart; "Today" for the live end of a 1D chart.
+    private func timeLabel(_ moment: Date) -> String {
+        if pickedPoint == nil { return chart?.marketOpen == true ? "Today" : "At the close" }
+        if chart?.timeframe == "1D" { return moment.formatted(date: .omitted, time: .shortened) }
+        return moment.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
     private func dayLabel(_ day: Date?) -> String {
@@ -270,6 +287,7 @@ struct StockLine: View {
     let points: [StockPoint]
     @Binding var picked: Date?
     var label = "Price line"
+    var baseline: Double? = nil         // the dotted line; the first point when none is given
 
     private var pickedPoint: StockPoint? {
         guard let picked else { return nil }
@@ -277,7 +295,7 @@ struct StockLine: View {
     }
 
     private var span: ClosedRange<Double> {
-        let closes = points.map(\.close)
+        let closes = points.map(\.close) + (baseline.map { [$0] } ?? [])
         guard let lo = closes.min(), let hi = closes.max(), hi > lo else { return 0...1 }
         return (lo - (hi - lo) * 0.1)...(hi + (hi - lo) * 0.04)
     }
@@ -294,8 +312,8 @@ struct StockLine: View {
                     .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
                     .interpolationMethod(.monotone)
             }
-            if let first = points.first {
-                RuleMark(y: .value("Start", first.close))
+            if let start = baseline ?? points.first?.close {
+                RuleMark(y: .value("Start", start))
                     .foregroundStyle(Color.secondary.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
             }
@@ -312,7 +330,8 @@ struct StockLine: View {
         .chartXSelection(value: $picked)
         .sensoryFeedback(.selection, trigger: pickedPoint?.day)
         .shadow(color: Color.ghost.opacity(0.45), radius: 8)
-        .accessibilityLabel("\(label), \(points.count) days. Drag to read a day.")
+        .accessibilityLabel(points.first?.real != nil ? "\(label), \(points.count) intraday bars. Drag to read a time."
+                                                      : "\(label), \(points.count) days. Drag to read a day.")
     }
 }
 
@@ -400,20 +419,37 @@ struct DayNumbers: View {
     let bar: BarRow
     let timeframe: String
 
+    /// The latest session's numbers. A daily chart: its last bar. An intraday chart: the session's bars added up
+    /// (the open of the first, the highest high, the lowest low, the volume summed).
+    private var day: (open: String, high: String, low: String, volume: Double) {
+        guard chart.isIntraday, let lastDay = bar.instant.map(Self.newYorkDay) else {
+            return (bar.open, bar.high, bar.low, Double(bar.volume) ?? 0)
+        }
+        let session = chart.bars.filter { $0.instant.map(Self.newYorkDay) == lastDay }
+        let highs = session.compactMap { Decimal(string: $0.high) }, lows = session.compactMap { Decimal(string: $0.low) }
+        return (session.first?.open ?? bar.open, highs.max().map { "\($0)" } ?? bar.high,
+                lows.min().map { "\($0)" } ?? bar.low, session.compactMap { Double($0.volume) }.reduce(0, +))
+    }
+
+    static func newYorkDay(_ d: Date) -> String {
+        Stamp.localDay(d, in: TimeZone(identifier: "America/New_York") ?? .current)
+    }
+
     var body: some View {
         let highs = chart.bars.compactMap { Decimal(string: $0.high) }, lows = chart.bars.compactMap { Decimal(string: $0.low) }
+        let d = day
         HStack(alignment: .top) {
-            Figure(label: "Open", value: Show.money(bar.open))
-            Figure(label: "High", value: Show.money(bar.high))
-            Figure(label: "Low", value: Show.money(bar.low))
+            Figure(label: "Open", value: Show.money(d.open))
+            Figure(label: "High", value: Show.money(d.high))
+            Figure(label: "Low", value: Show.money(d.low))
         }
         HStack(alignment: .top) {
             // Alpaca's free feed counts one exchange (IEX), so this is far below the stock's whole volume
-            Figure(label: "IEX volume", value: (Double(bar.volume) ?? 0).formatted(.number.notation(.compactName)))
+            Figure(label: "IEX volume", value: d.volume.formatted(.number.notation(.compactName)))
             Figure(label: "\(timeframe) high", value: highs.max().map { Money.format($0) } ?? "—")
             Figure(label: "\(timeframe) low", value: lows.min().map { Money.format($0) } ?? "—")
         }
-        Text("\(chart.source ?? "?") · \(Stamp.short(chart.asOf)) · daily bars, delayed")
+        Text(chart.sourceLine)
             .font(.caption2).foregroundStyle(.tertiary)
     }
 }

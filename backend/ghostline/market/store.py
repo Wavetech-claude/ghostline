@@ -23,6 +23,15 @@ def save_bars(db: Database, ticker: str, timeframe: str, bars: list[Bar], source
     return len(bars)
 
 
+INTRADAY = ("5Min", "30Min")
+
+
+def prune_intraday(db: Database, ticker: str, keep_days: int) -> int:
+    """Remove one ticker's intraday bars older than keep_days (daily bars are never touched)."""
+    return db.execute("DELETE FROM market_bars WHERE ticker = %s AND timeframe = ANY(%s) "
+                      "AND ts < now() - make_interval(days => %s)", (ticker, list(INTRADAY), keep_days))
+
+
 def save_quotes(db: Database, quotes: list[Quote], source: str, as_of: dt.datetime) -> int:
     with db.connection() as conn:
         for q in quotes:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -13,13 +14,16 @@ from pydantic import BaseModel, Field, field_validator
 from ghostline import indicators
 from ghostline.auth import OwnerSub
 from ghostline.market import store
-from ghostline.market.calendar import Calendar
+from ghostline.market.calendar import NEW_YORK, Calendar
 from ghostline.market.jobs import Jobs
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import configured
 
 router = APIRouter()
-TIMEFRAMES = {"1D": 2, "1W": 8, "1M": 32, "3M": 95, "6M": 190, "1Y": 370, "5Y": 1830}
+TIMEFRAMES = {"1M": 32, "3M": 95, "6M": 190, "1Y": 370, "5Y": 1830}          # daily bars: days back
+# intraday: (bar length, sessions shown, seconds a stored copy stays fresh while the market is open)
+INTRADAY = {"1D": ("5Min", 1, 60), "1W": ("30Min", 5, 300)}
+_fetched: dict[tuple[str, str], float] = {}     # (ticker, bar length) → when this process last asked Alpaca
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 FRESH_DAYS = 4   # a weekend and a holiday: older than this, a chart the owner opens is fetched again
 
@@ -42,10 +46,69 @@ def search(request: Request, q: str = Query(min_length=1, max_length=40), sub: s
     return {"results": [{"ticker": r["ticker"], "name": r["name"], "watched": bool(r["watched"])} for r in rows]}
 
 
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+def intraday_window(cal: Calendar, now: dt.datetime, sessions: int) -> list[dt.date]:
+    """The session days a 1D or 1W chart shows: the latest session that has opened (today once the bell rings, the
+    one before until then), and the sessions before it."""
+    today = now.astimezone(NEW_YORK).date()
+    latest = today if cal.is_session(today) and cal.opens_at(today) <= now else cal.previous_session(today)
+    days = [latest]
+    while len(days) < sessions:
+        days.insert(0, cal.previous_session(days[0]))
+    return days
+
+
+def _in_session(cal: Calendar, days: list[dt.date], ts: dt.datetime) -> bool:
+    """A bar inside regular hours of one of the days (Alpaca also returns pre-market and after-hours bars)."""
+    day = ts.astimezone(NEW_YORK).date()
+    return day in days and cal.opens_at(day) <= ts < cal.closes_at(day)
+
+
+def _intraday(request: Request, ticker: str, timeframe: str) -> dict:
+    """A 1D chart (5-minute bars of the latest session) or a 1W chart (30-minute bars of the last five), from
+    Alpaca's IEX feed: live, IEX's volume only. Fetched in production when the stored copy is missing, short of the
+    window, or older than its freshness while the market is open; staging reads production's copy."""
+    db = request.app.state.db
+    interval, sessions, fresh_s = INTRADAY[timeframe]
+    cal, now = Calendar.load(db), _now()
+    days = intraday_window(cal, now, sessions)
+    start, end = cal.opens_at(days[0]), cal.closes_at(days[-1])
+    market_open = cal.opens_at(days[-1]) <= now < end
+    stored = [b for b in store.bars(db, ticker, interval, since=start) if _in_session(cal, days, b["ts"])]
+    newest = max((b["as_of"] for b in stored), default=None)
+    wanted = (not stored or stored[0]["ts"].astimezone(NEW_YORK).date() > days[0]
+              or (market_open and (newest is None or (now - newest).total_seconds() > fresh_s))
+              or (not market_open and (newest is None or newest < end)))
+    settings = request.app.state.settings
+    asked = _fetched.get((ticker, interval))
+    recently = asked is not None and time.monotonic() - asked <= fresh_s      # one ask per freshness window
+    if wanted and settings.is_production and SYMBOL.match(ticker) and not recently:
+        _fetched[(ticker, interval)] = time.monotonic()
+        Jobs(db).intraday_for(ticker, interval, start, min(end, now))
+        stored = [b for b in store.bars(db, ticker, interval, since=start) if _in_session(cal, days, b["ts"])]
+    daily = store.bars(db, ticker, "1D")
+    before = [b for b in daily if b["ts"].date() < days[-1]]
+    ind = indicators.chart_payload(stored)
+    levels = indicators.chart_payload(daily)["levels"] if daily else []
+    return {"ticker": ticker, "timeframe": timeframe, "interval": interval, "feed": "iex", "delayed": False,
+            "bars": store.as_json(stored),
+            "source": stored[-1]["source"] if stored else None,
+            "as_of": max(b["as_of"] for b in stored).isoformat() if stored else None,
+            "previous_close": str(before[-1]["close"]) if before else None,
+            "market_open": market_open, "sessions": [d.isoformat() for d in days],
+            "sma20": ind["sma20"], "sma50": ind["sma50"], "sma200": ind["sma200"], "rsi14": ind["rsi14"],
+            "macd": ind["macd"], "bollinger": ind["bollinger"], "levels": levels}
+
+
 @router.get("/charts")
 def charts(request: Request, ticker: str, timeframe: str = Query(default="6M"), sub: str = OwnerSub) -> dict:
+    if timeframe in INTRADAY:
+        return _intraday(request, ticker.upper(), timeframe)
     if timeframe not in TIMEFRAMES:
-        raise HTTPException(status_code=422, detail=f"timeframe is one of {', '.join(TIMEFRAMES)}")
+        raise HTTPException(status_code=422, detail=f"timeframe is one of {', '.join([*INTRADAY, *TIMEFRAMES])}")
     db = request.app.state.db
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=TIMEFRAMES[timeframe])
     # indicators need history before the window: read the whole stored series, compute, then cut
@@ -56,7 +119,8 @@ def charts(request: Request, ticker: str, timeframe: str = Query(default="6M"), 
     ind = indicators.chart_payload(all_bars)
     keep = [i for i, b in enumerate(all_bars) if b["ts"] >= since]
     cut = (lambda xs: [xs[i] for i in keep]) if keep else (lambda xs: [])
-    out = {"ticker": ticker.upper(), "timeframe": timeframe, "bars": store.as_json(cut(all_bars)),
+    out = {"ticker": ticker.upper(), "timeframe": timeframe, "interval": "1Day", "feed": "iex",
+           "bars": store.as_json(cut(all_bars)),
            "source": all_bars[-1]["source"] if all_bars else None,
            "as_of": all_bars[-1]["as_of"].isoformat() if all_bars else None,
            "sma20": cut(ind["sma20"]), "sma50": cut(ind["sma50"]), "sma200": cut(ind["sma200"]),

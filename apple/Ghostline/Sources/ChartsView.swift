@@ -14,7 +14,7 @@ struct ChartsView: View {
     @State private var error: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let timeframes = ["1W", "1M", "3M", "6M", "1Y", "5Y"]
+    private let timeframes = ["1D", "1W", "1M", "3M", "6M", "1Y", "5Y"]
 
     var body: some View {
         ScrollView {
@@ -30,7 +30,7 @@ struct ChartsView: View {
                     RSIChart(chart: chart).frame(height: 90)
                     MACDChart(chart: chart).frame(height: 90)
                     LevelsList(levels: chart.levels)
-                    Text("\(chart.source ?? "?") · bars as of \(Stamp.short(chart.asOf)) · daily, delayed data")
+                    Text(chart.sourceLine)
                         .font(.caption2).foregroundStyle(.tertiary)
                 } else if let error {
                     Text(error).foregroundStyle(.secondary)
@@ -79,9 +79,7 @@ struct PriceChart: View {
     /// The bar nearest the finger while it drags across the chart.
     private var pickedBar: BarRow? {
         guard let picked else { return nil }
-        return chart.bars.filter { $0.date != nil }.min {
-            abs($0.date!.timeIntervalSince(picked)) < abs($1.date!.timeIntervalSince(picked))
-        }
+        return chart.bar(nearest: picked)
     }
 
     /// The line takes the period's result: gain green when the last close is at or above the first, else loss red.
@@ -117,8 +115,8 @@ struct PriceChart: View {
 
     var body: some View {
         Chart {
-            ForEach(chart.bars) { bar in
-                if let d = bar.date, let o = Double(bar.open), let h = Double(bar.high), let l = Double(bar.low),
+            ForEach(Array(zip(chart.bars, chart.plotDates)), id: \.0.id) { bar, x in
+                if let d = x, let o = Double(bar.open), let h = Double(bar.high), let l = Double(bar.low),
                    let c = Double(bar.close) {
                     if style == "candles" {
                         RuleMark(x: .value("Date", d), yStart: .value("Low", l), yEnd: .value("High", h))
@@ -157,14 +155,14 @@ struct PriceChart: View {
                         .foregroundStyle(.gray.opacity(0.6)).lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
                 }
             }
-            if let bar = pickedBar, let d = bar.date {
+            if let bar = pickedBar, let d = chart.plotDate(of: bar) {
                 RuleMark(x: .value("Picked", d))
                     .foregroundStyle(Color.secondary.opacity(0.5))
                     .annotation(position: .top, spacing: 4,
                                 overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
                         Callout(lines: [Show.money(bar.close),
                                         "O \(Show.money(bar.open))  H \(Show.money(bar.high))  L \(Show.money(bar.low))"],
-                                day: d)
+                                day: bar.date ?? d, withTime: chart.isIntraday)
                     }
             }
             ForEach(levels) { level in
@@ -179,9 +177,10 @@ struct PriceChart: View {
         }
         .chartYScale(domain: span)
         .chartLegend(.hidden)
+        .chartXAxis(chart.isIntraday ? .hidden : .automatic)     // intraday x values have the nights taken out
         .chartXSelection(value: $picked)
         .sensoryFeedback(.selection, trigger: pickedBar?.id)
-        .accessibilityLabel("Price chart for \(chart.ticker), \(chart.bars.count) daily bars")
+        .accessibilityLabel("Price chart for \(chart.ticker), \(chart.bars.count) \(chart.isIntraday ? "intraday" : "daily") bars")
     }
 }
 
@@ -189,12 +188,13 @@ private struct VolumeChart: View {
     let chart: ChartData
 
     var body: some View {
-        Chart(chart.bars) { bar in
-            if let d = bar.date, let v = Double(bar.volume) {
+        Chart(Array(zip(chart.bars, chart.plotDates)), id: \.0.id) { bar, x in
+            if let d = x, let v = Double(bar.volume) {
                 BarMark(x: .value("Date", d), y: .value("Volume", v))
                     .foregroundStyle(.secondary.opacity(0.5))
             }
         }
+        .chartXAxis(chart.isIntraday ? .hidden : .automatic)
         .chartYAxis { AxisMarks(values: .automatic(desiredCount: 2)) }
         .accessibilityLabel("Volume")
     }
@@ -213,6 +213,7 @@ private struct RSIChart: View {
             RuleMark(y: .value("Oversold", 30)).foregroundStyle(.gray.opacity(0.4)).lineStyle(StrokeStyle(dash: [3]))
         }
         .chartYScale(domain: 0...100)
+        .chartXAxis(chart.isIntraday ? .hidden : .automatic)
         .chartYAxis { AxisMarks(values: [30, 70]) }
         .accessibilityLabel("RSI 14")
     }
@@ -237,6 +238,7 @@ private struct MACDChart: View {
             }
         }
         .chartLegend(.hidden)
+        .chartXAxis(chart.isIntraday ? .hidden : .automatic)
         .accessibilityLabel("MACD")
     }
 }
