@@ -448,6 +448,32 @@ def mark_suffix_kinds(db: Database) -> int:
     return n
 
 
+def save_movers(db: Database, kind: str, rows: list[dict], source: str, as_of: dt.datetime) -> int:
+    """One list (gainers, losers or active) replaced whole: the newest answer is the only one kept."""
+    with db.connection() as conn:
+        conn.execute("DELETE FROM market_movers WHERE kind = %s", (kind,))
+        for i, r in enumerate(rows, 1):
+            conn.execute("INSERT INTO market_movers (kind, rank, ticker, price, change, change_pct, volume, "
+                         "trade_count, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                         (kind, i, str(r["symbol"]).upper(), r.get("price"), r.get("change"), r.get("percent_change"),
+                          r.get("volume"), r.get("trade_count"), source, as_of))
+        conn.commit()
+    return len(rows)
+
+
+def industry_due(db: Database, fresh_days: int, min_dollar_volume: Decimal, limit: int) -> list[str]:
+    """Traded common stocks (and ADRs) whose industry is unknown or a week old, the most traded first."""
+    rows = db.fetch_all("SELECT ticker FROM tickers WHERE kind IN ('CS', 'ADRC') AND dollar_volume_20d >= %s "
+                        "AND (industry_at IS NULL OR industry_at < now() - make_interval(days => %s)) "
+                        "ORDER BY industry_at NULLS FIRST, dollar_volume_20d DESC LIMIT %s",
+                        (min_dollar_volume, fresh_days, limit))
+    return [r["ticker"] for r in rows]
+
+
+def save_industry(db: Database, ticker: str, industry: str | None) -> None:
+    db.execute("UPDATE tickers SET industry = %s, industry_at = now() WHERE ticker = %s", (industry, ticker))
+
+
 @dataclass(frozen=True)
 class DayBar:
     """One ticker's session from the stored whole-market file."""

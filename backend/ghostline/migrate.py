@@ -19,11 +19,17 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 
 def files(migrations_dir: str | Path) -> list[Path]:
-    """The migration files, in order; a file whose name is not NNNN_name.sql is refused."""
-    out = []
+    """The migration files, in order; a file whose name is not NNNN_name.sql is refused, and so is a number used twice:
+    two branches that each took the next number (0018, 2026-11-02) would otherwise run in an order nobody chose."""
+    out: list[Path] = []
+    seen: dict[str, str] = {}
     for p in sorted(Path(migrations_dir).glob("*.sql")):
-        if not _NAME.match(p.name):
+        m = _NAME.match(p.name)
+        if not m:
             raise ValueError(f"migration name not NNNN_name.sql: {p.name}")
+        if m.group(1) in seen:
+            raise ValueError(f"migration number {m.group(1)} used twice: {seen[m.group(1)]} and {p.name}")
+        seen[m.group(1)] = p.name
         out.append(p)
     return out
 

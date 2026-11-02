@@ -25,6 +25,18 @@ def test_a_badly_named_migration_is_refused(tmp_path):
         migrate.files(tmp_path)
 
 
+def test_a_migration_number_used_twice_is_refused(tmp_path):
+    (tmp_path / "0001_a.sql").write_text("SELECT 1;")
+    (tmp_path / "0001_b.sql").write_text("SELECT 1;")
+    with pytest.raises(ValueError, match="used twice"):
+        migrate.files(tmp_path)
+
+
+def test_the_real_migrations_use_each_number_once():
+    numbers = [p.name[:4] for p in migrate.files(MIGRATIONS)]
+    assert len(numbers) == len(set(numbers))
+
+
 def test_a_failing_migration_leaves_nothing_half_applied(fresh_db, tmp_path):
     (tmp_path / "0007_ok.sql").write_text("CREATE TABLE t_ok (id int);", encoding="utf-8")
     (tmp_path / "0008_bad.sql").write_text("CREATE TABLE t_bad (id int); SELECT nope_function();", encoding="utf-8")

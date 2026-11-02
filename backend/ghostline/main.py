@@ -21,6 +21,7 @@ from ghostline.routes import auth as auth_routes
 from ghostline.routes import claude as claude_routes
 from ghostline.routes import corporate as corporate_routes
 from ghostline.routes import devices as devices_routes
+from ghostline.routes import discover as discover_routes
 from ghostline.routes import ideas as ideas_routes
 from ghostline.routes import invest as invest_routes
 from ghostline.routes import journal as journal_routes
@@ -74,6 +75,7 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
     app.include_router(journal_routes.router)
     app.include_router(reconcile_routes.router)
     app.include_router(corporate_routes.router)
+    app.include_router(discover_routes.router)
 
     @app.get("/version")
     def version() -> dict:

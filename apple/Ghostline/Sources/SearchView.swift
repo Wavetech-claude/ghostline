@@ -1,7 +1,8 @@
 import GhostlineKit
 import SwiftUI
 
-/// Search any stock by ticker or company name, the way Robinhood does: a result opens its stock page, watched or not,
+/// Search any stock by ticker or company name, the way Robinhood does; with nothing typed, Discover (movers, sectors,
+/// industries, themes). Search: a result opens its stock page, watched or not,
 /// and the page has its own Watch button. A ticker the directory does not list (a fund such as SPY) still opens.
 struct SearchView: View {
     @Environment(SessionModel.self) private var session
@@ -15,6 +16,9 @@ struct SearchView: View {
 
     var body: some View {
         List {
+            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                DiscoverSections()
+            }
             if let problem = search.problem {
                 Text(problem).font(.footnote).foregroundStyle(.secondary)
             }
@@ -23,12 +27,6 @@ struct SearchView: View {
             }
             ForEach(search.results) { r in
                 NavigationLink(value: r.ticker) { TickerMatchRow(match: r) }
-            }
-        }
-        .overlay {
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                ContentUnavailableView("Search Stocks", systemImage: "magnifyingglass",
-                                       description: Text("Type a ticker or part of a company's name: “n” lists Nvidia, Netflix, Nike."))
             }
         }
         .navigationTitle("Search")

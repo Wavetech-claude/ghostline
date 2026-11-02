@@ -47,6 +47,7 @@ UA = "Ghostline/0.2 (personal research tool; contact: owner)"
 REPORT_HOURS = ("bmo", "amc", "dmh")             # Finnhub: before the open, after the close, during the session
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
 TickerRef = tuple[str, str, str | None, str | None]   # Massive's ticker list: ticker, name, type, CIK
+ALPACA_SCREENER = "https://data.alpaca.markets/v1beta1/screener/stocks"   # movers and most active
 MASSIVE_V3 = "https://api.massive.com/v3"           # Massive's reference data (ticker names and types)
 ALPACA_OPTIONS = "https://data.alpaca.markets/v1beta1/options"   # option snapshots, feed "indicative" (free)
 ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
@@ -298,6 +299,18 @@ class Alpaca(Source):
                     out.append(Quote(sym, dec(q.get("bp")), dec(q.get("ap")), dec(t.get("p")), ts, delayed=True))
         return out
 
+    def movers(self, top: int = 50) -> dict:
+        """The whole market's top gainers and losers right now (symbol, price, change, percent_change), live in the
+        session; outside it, the last session's."""
+        j = self.fetch(ALPACA_SCREENER + "/movers", params={"top": top}, headers=self._headers())
+        return {"gainers": j.get("gainers") or [], "losers": j.get("losers") or [],
+                "as_of": _stamp(j.get("last_updated"))}
+
+    def most_actives(self, top: int = 50) -> dict:
+        """The most traded stocks by volume right now (symbol, volume, trade_count)."""
+        j = self.fetch(ALPACA_SCREENER + "/most-actives", params={"top": top, "by": "volume"}, headers=self._headers())
+        return {"active": j.get("most_actives") or [], "as_of": _stamp(j.get("last_updated"))}
+
     def quotes(self, tickers: list[str]) -> list[Quote]:
         j = self.get("/stocks/quotes/latest", params={"symbols": ",".join(tickers), "feed": "iex"},
                      headers=self._headers())
@@ -421,6 +434,13 @@ class Finnhub(Source):
                  "hold": int(r.get("hold") or 0), "sell": int(r.get("sell") or 0),
                  "strong_sell": int(r.get("strongSell") or 0)}
                 for r in (j if isinstance(j, list) else []) if isinstance(r, dict) and (d := _date(r.get("period")))]
+
+    def industry(self, ticker: str) -> str | None:
+        """The company's industry from its profile (free plan): Technology, Semiconductors, Banking, Construction...;
+        None for a fund or a company Finnhub does not cover."""
+        p = self.get("/stock/profile2", params={"symbol": ticker}, headers=self._headers())
+        name = (p or {}).get("finnhubIndustry") if isinstance(p, dict) else None
+        return str(name)[:80] if name and name != "N/A" else None
 
     def quote(self, ticker: str) -> Quote | None:
         q = self.get("/quote", params={"symbol": ticker}, headers=self._headers())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -34,6 +35,9 @@ TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
 PUT_DTE = (30, 45)
 MARKET_DAILY_SESSIONS = 23     # the whole-market file kept filled: 20 sessions for popularity, a month for movers
 MARKET_DAILY_KEEP_DAYS = 100   # calendar days of the whole-market file kept (about 70 sessions)
+INDUSTRY_FRESH_DAYS = 7        # each traded stock's industry is asked at most once a week
+INDUSTRY_PER_RUN = 600         # Finnhub profiles a night (about 10 minutes at its 60 a minute)
+INDUSTRY_MIN_DOLLAR_VOLUME = Decimal("5000000")    # only stocks that trade at least $5M a day get an industry
 ANALYST_FRESH_DAYS = 7         # analysts' views move slowly: each stock is asked at most once a week per source
 ANALYST_FMP_CAP = 60           # FMP calls one morning run may spend on analysts (2 a stock) of the day's 250
 ANALYST_FMP_RESERVE = 200      # a stock page opened on demand asks FMP only below this many calls today
@@ -271,6 +275,35 @@ class Jobs:
                 out["complete"] = True
                 break
         out["typed_by_symbol"] = store.mark_suffix_kinds(self.db)
+        return out
+
+    def pull_movers(self) -> dict:
+        """Alpaca's live top gainers, losers and most active (top 50 each, two calls), replacing the stored lists."""
+        alpaca: Alpaca = self.sources["alpaca"]
+        out = {}
+        moved = self._call("alpaca", "screener/movers", alpaca.movers)
+        if moved is not None:
+            as_of = moved["as_of"] or utcnow()
+            out["gainers"] = store.save_movers(self.db, "gainers", moved["gainers"], "alpaca", as_of)
+            out["losers"] = store.save_movers(self.db, "losers", moved["losers"], "alpaca", as_of)
+        active = self._call("alpaca", "screener/most-actives", alpaca.most_actives)
+        if active is not None:
+            out["active"] = store.save_movers(self.db, "active", active["active"], "alpaca",
+                                              active["as_of"] or utcnow())
+        return out
+
+    def pull_industries(self, per_run: int = INDUSTRY_PER_RUN) -> dict:
+        """Each traded stock's industry from Finnhub's profiles, paced at its 60 a minute, at most `per_run` a night,
+        the stocks never asked first; a refused or failed call stops the run (the next night carries on)."""
+        finnhub: Finnhub = self.sources["finnhub"]
+        out = {"asked": 0, "tagged": 0}
+        for ticker in store.industry_due(self.db, INDUSTRY_FRESH_DAYS, INDUSTRY_MIN_DOLLAR_VOLUME, per_run):
+            got = self._call("finnhub", "stock/profile2", lambda t: [finnhub.industry(t)], ticker)
+            if got is None:
+                break
+            store.save_industry(self.db, ticker, got[0])
+            out["asked"] += 1
+            out["tagged"] += int(got[0] is not None)
         return out
 
     def build_universe(self, day: dt.date | None = None, size: int = 50) -> dict:
