@@ -25,8 +25,26 @@ public struct OrderRow: Codable, Sendable, Equatable, Identifiable {
     public let tradeId: Int?
     public let note: String?
     public let replacesOrderId: Int?   // a replacement names the order it replaced
+    public let trailAmount: String?    // a trailing stop: the gap in dollars, or
+    public let trailPercent: String?   // the gap in percent
+    public let waterMark: String?      // the best price it has seen (the stop follows it)
+    public let takeProfit: String?     // a bracket's buy: the exits it opens when it fills
+    public let bracketStop: String?
+    public let parentOrderId: Int?     // a bracket exit: the buy that opened it
 
     public var isOpen: Bool { status == "open" }
+    public var isBracketExit: Bool { parentOrderId != nil }
+
+    /// The order's kind in words: "Trailing stop, $5 trail", "Bracket buy: take profit 110, stop 95".
+    public var kindText: String {
+        if type == "trailing_stop" {
+            let gap = trailAmount.map { "$\($0)" } ?? trailPercent.map { "\($0)%" } ?? "?"
+            return "Trailing stop, \(gap) trail" + (stopPrice.map { ", stop now \($0)" } ?? "")
+        }
+        if let tp = takeProfit, let st = bracketStop { return "Bracket: take profit \(tp), stop \(st)" }
+        if let parent = parentOrderId { return (type == "limit" ? "Take-profit" : "Stop-loss") + " of bracket #\(parent)" }
+        return type.replacingOccurrences(of: "_", with: "-")
+    }
     public var isRefused: Bool { status == "refused" }
 }
 
@@ -43,10 +61,19 @@ public struct OrderInput: Codable, Sendable, Equatable {
     public var stopLoss: String?
     public var optionSymbol: String?
     public var note: String?
+    public var trailAmount: String?
+    public var trailPercent: String?
+    public var takeProfit: String?
+    public var bracketStop: String?
 
     public init(book: String = "practice", ticker: String, asset: String = "stock", side: String, type: String = "market",
                 tif: String = "day", quantity: String, limitPrice: String? = nil, stopPrice: String? = nil,
-                stopLoss: String? = nil, optionSymbol: String? = nil, note: String? = nil) {
+                stopLoss: String? = nil, optionSymbol: String? = nil, note: String? = nil, trailAmount: String? = nil,
+                trailPercent: String? = nil, takeProfit: String? = nil, bracketStop: String? = nil) {
+        self.trailAmount = trailAmount
+        self.trailPercent = trailPercent
+        self.takeProfit = takeProfit
+        self.bracketStop = bracketStop
         self.book = book
         self.ticker = ticker
         self.asset = asset

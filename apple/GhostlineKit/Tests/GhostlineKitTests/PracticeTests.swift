@@ -77,3 +77,32 @@ import Testing
         #expect(lines.map(\.1) == ["1 fields", "yes", "50.25", "pre_breakout"])
     }
 }
+
+@Suite struct OrderTypesTests {
+    private func row(_ extra: String) throws -> OrderRow {
+        let json = #"{"id":5,"ticker":"AAPL","asset":"stock","side":"sell","type":"trailing_stop","tif":"gtc","quantity":"2","status":"open","triggered":false,"placed_at":"x",\#(extra)}"#
+        return try GhostlineJSON.decoder().decode(OrderRow.self, from: Data(json.utf8))
+    }
+
+    @Test func aTrailingStopSaysItsTrailAndItsStopNow() throws {
+        let o = try row(#""trail_amount":"5.0000","stop_price":"105.0000","water_mark":"110.0000""#)
+        #expect(o.kindText == "Trailing stop, $5.0000 trail, stop now 105.0000" && o.isReplaceable && !o.isBracketExit)
+        let p = try row(#""trail_percent":"2.0000""#)
+        #expect(p.kindText == "Trailing stop, 2.0000% trail")
+    }
+
+    @Test func aBracketAndItsExitsSayWhatTheyAre() throws {
+        let buy = try GhostlineJSON.decoder().decode(OrderRow.self, from: Data(#"{"id":7,"ticker":"AAPL","asset":"stock","side":"buy","type":"market","tif":"day","quantity":"2","status":"filled","triggered":false,"placed_at":"x","take_profit":"110.0000","bracket_stop":"95.0000"}"#.utf8))
+        #expect(buy.kindText == "Bracket: take profit 110.0000, stop 95.0000")
+        let exit = try GhostlineJSON.decoder().decode(OrderRow.self, from: Data(#"{"id":8,"ticker":"AAPL","asset":"stock","side":"sell","type":"stop","tif":"gtc","quantity":"2","status":"open","triggered":false,"placed_at":"x","stop_price":"95.0000","parent_order_id":7}"#.utf8))
+        #expect(exit.kindText == "Stop-loss of bracket #7" && exit.isBracketExit)
+    }
+
+    @Test func theTicketSendsTheTrailAndTheBracket() throws {
+        let input = OrderInput(ticker: "AAPL", side: "buy", quantity: "2", takeProfit: "110", bracketStop: "95")
+        let json = try JSONSerialization.jsonObject(with: GhostlineJSON.encoder().encode(input)) as? [String: Any]
+        #expect(json?["take_profit"] as? String == "110" && json?["bracket_stop"] as? String == "95")
+        let r = try JSONSerialization.jsonObject(with: GhostlineJSON.encoder().encode(ReplaceInput(trailPercent: "2"))) as? [String: Any]
+        #expect(r?.keys.sorted() == ["trail_percent"])
+    }
+}

@@ -37,7 +37,7 @@ class OrderIn(BaseModel):
     ticker: str = Field(default="", max_length=12)
     asset: str = Field(default="stock", pattern="^(stock|option)$")
     side: str = Field(pattern="^(buy|sell|sell_to_open|buy_to_close)$")
-    type: str = Field(default="market", pattern="^(market|limit|stop|stop_limit)$")
+    type: str = Field(default="market", pattern="^(market|limit|stop|stop_limit|trailing_stop)$")
     tif: str = Field(default="day", pattern="^(day|gtc)$")
     quantity: Decimal = Field(gt=0)
     limit_price: Decimal | None = Field(default=None, gt=0)
@@ -45,6 +45,10 @@ class OrderIn(BaseModel):
     stop_loss: Decimal | None = Field(default=None, gt=0, description="the worst case the risk check measures to")
     option_symbol: str | None = Field(default=None, max_length=32)
     note: str | None = Field(default=None, max_length=500)
+    trail_amount: Decimal | None = Field(default=None, gt=0, description="trailing stop: the gap in dollars")
+    trail_percent: Decimal | None = Field(default=None, gt=0, lt=100, description="trailing stop: the gap in percent")
+    take_profit: Decimal | None = Field(default=None, gt=0, description="bracket: the exit's limit price")
+    bracket_stop: Decimal | None = Field(default=None, gt=0, description="bracket: the exit's stop price")
 
     @field_validator("ticker", "option_symbol")
     @classmethod
@@ -70,6 +74,25 @@ class OrderIn(BaseModel):
             raise HTTPException(status_code=422, detail=f"a {self.type} order needs a limit price")
         if self.type in ("stop", "stop_limit") and self.stop_price is None:
             raise HTTPException(status_code=422, detail=f"a {self.type} order needs a stop price")
+        if self.type == "trailing_stop":
+            if self.asset != "stock":
+                raise HTTPException(status_code=422, detail="a trailing stop is a stock order")
+            if (self.trail_amount is None) == (self.trail_percent is None):
+                raise HTTPException(status_code=422, detail="a trailing stop has one trail: an amount or a percent")
+            if self.stop_price is not None or self.limit_price is not None:
+                raise HTTPException(status_code=422, detail="a trailing stop sets its own stop from the trail")
+        elif self.trail_amount is not None or self.trail_percent is not None:
+            raise HTTPException(status_code=422, detail="only a trailing stop has a trail")
+        if (self.take_profit is None) != (self.bracket_stop is None):
+            raise HTTPException(status_code=422, detail="a bracket has both a take-profit and a stop")
+        if self.take_profit is not None:
+            if self.asset != "stock" or self.side != "buy" or self.type not in ("market", "limit"):
+                raise HTTPException(status_code=422, detail="a bracket is a stock buy, market or limit")
+            if self.take_profit <= self.bracket_stop:
+                raise HTTPException(status_code=422, detail="the take-profit must be above the stop")
+            if self.limit_price is not None and not self.bracket_stop < self.limit_price < self.take_profit:
+                raise HTTPException(status_code=422,
+                                    detail="a bracket's limit sits between its stop and its take-profit")
 
 
 @router.post("/practice/orders", status_code=201)
@@ -106,12 +129,12 @@ def list_orders(request: Request, sub: str = OwnerSub, book: str | None = None, 
 @router.delete("/practice/orders/{order_id}")
 def cancel_order(order_id: int, request: Request, sub: str = OwnerSub) -> dict:
     db = request.app.state.db
-    row = db.fetch_one("SELECT status FROM orders WHERE id = %s", (order_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="no such order")
-    if row["status"] != "open":
-        raise HTTPException(status_code=409, detail=f"the order is {row['status']}, not open")
-    db.execute("UPDATE orders SET status = 'cancelled', reason = 'cancelled by the owner' WHERE id = %s", (order_id,))
+    try:
+        Practice(db).cancel(order_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="no such order") from exc
+    except ReplaceRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _row(db.fetch_one("SELECT o.*, b.kind AS book FROM orders o JOIN books b ON b.id = o.book_id "
                              "WHERE o.id = %s", (order_id,)))
 
@@ -122,6 +145,10 @@ class ReplaceIn(BaseModel):
     limit_price: Decimal | None = Field(default=None, gt=0)
     stop_price: Decimal | None = Field(default=None, gt=0)
     tif: str | None = Field(default=None, pattern="^(day|gtc)$")
+    trail_amount: Decimal | None = Field(default=None, gt=0)
+    trail_percent: Decimal | None = Field(default=None, gt=0, lt=100)
+    take_profit: Decimal | None = Field(default=None, gt=0)
+    bracket_stop: Decimal | None = Field(default=None, gt=0)
 
 
 @router.post("/practice/orders/{order_id}/replace", status_code=201)

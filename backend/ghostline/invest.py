@@ -35,6 +35,15 @@ def _weights(scores: list[Decimal]) -> list[Decimal]:
     return [x / total for x in sq] if total else []
 
 
+
+def bracket_for(lane: str | None, stop: object, target: object) -> dict:
+    """A swing idea bought in practice carries its own exits: a bracket at its target and its stop (the owner's go,
+    2026-11-01). Another lane, or an idea without both, buys plainly."""
+    if lane != "swing" or stop is None or target is None:
+        return {}
+    s, t = Decimal(str(stop)), Decimal(str(target))
+    return {"take_profit": t, "bracket_stop": s} if t > s > 0 else {}
+
 class Planner:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -72,6 +81,7 @@ class Planner:
             "score": str(idea["score"]),
             "reason": idea["reason"],
             "dollars": str(ledger.money(dollars)),
+            "target": str(idea["target"]) if idea.get("target") is not None else None,
         }
         if price is None or price <= 0:
             split.update(decision="refuse", why="no stored price")
@@ -222,6 +232,7 @@ class Planner:
             ask, _ = self._price(s["ticker"])
             price = ask or Decimal(s["price"])
             qty = (Decimal(s["dollars"]) / price).quantize(SHARES, rounding=ROUND_DOWN)
+            exits = bracket_for(s.get("lane"), s.get("stop"), s.get("target"))
             row = self.p.place(
                 {
                     "book": "practice",
@@ -235,6 +246,7 @@ class Planner:
                     "idea_id": s["idea_id"],
                     "lane": s["lane"],
                     "note": f"Invest this #{plan_id}: {s['dollars']} into {s['ticker']}",
+                    **exits,
                 },
                 by="owner",
             )

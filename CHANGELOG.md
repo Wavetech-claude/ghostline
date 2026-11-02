@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.29.0] — unreleased
+
+- **Trailing stop** in the practice account (stocks): set the trail in dollars or percent. The stop follows the best
+  price since you placed it (the highest bid for a sale, the lowest ask for a buy) and never moves back; once the
+  market crosses it, it fills at the market. It moves on each fresh quote, about every 30 minutes in the session.
+- **Bracket orders** (stock buys, market or limit): add a take-profit and a stop loss. When the buy fills, two sell
+  orders open for the same shares, both good till cancelled; one filling cancels the other, and cancelling one ends
+  the bracket. A swing idea bought through Invest This or copied from the AI trader now comes with its own bracket at
+  the idea's target and stop.
+- **Replace** works for these too: a trailing stop can change its trail (the new one starts from the latest price,
+  like any new order); a bracket's exit can change its price but keeps the bracket's shares.
+
 ## [0.28.0] — unreleased
 
 - Option chains work without Tradier. Until its key is set, the chains for sell-put ideas, options practice and the

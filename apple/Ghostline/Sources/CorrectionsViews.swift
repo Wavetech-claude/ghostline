@@ -437,28 +437,41 @@ struct ReplaceOrderSheet: View {
     @State private var limit = ""
     @State private var stop = ""
     @State private var tif = "day"
+    @State private var trail = ""
+    @State private var takeProfit = ""
+    @State private var bracketStop = ""
     @State private var problem: String?
 
     private var hasLimit: Bool { order.type == "limit" || order.type == "stop_limit" }
     private var hasStop: Bool { order.type == "stop" || order.type == "stop_limit" }
+    private var isTrailing: Bool { order.type == "trailing_stop" }
+    private var isBracketBuy: Bool { order.takeProfit != nil }
+    private var trailIsPercent: Bool { order.trailPercent != nil }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     LabeledContent("Order", value: "\(order.side.replacingOccurrences(of: "_", with: " ")) \(order.optionSymbol ?? order.ticker)")
-                    LabeledContent("Type", value: order.type.replacingOccurrences(of: "_", with: "-"))
+                    LabeledContent("Type", value: order.kindText)
                 }
                 Section {
-                    field("Quantity", $quantity)
+                    if !order.isBracketExit { field("Quantity", $quantity) }
                     if hasLimit { field("Limit Price", $limit) }
                     if hasStop { field("Stop Price", $stop) }
+                    if isTrailing { field(trailIsPercent ? "Trail (%)" : "Trail ($)", $trail) }
+                    if isBracketBuy {
+                        field("Take Profit", $takeProfit)
+                        field("Stop Loss", $bracketStop)
+                    }
                     Picker("Good For", selection: $tif) {
                         Text("Day").tag("day")
                         Text("Until Cancelled").tag("gtc")
                     }
                 } footer: {
-                    Text("The new order passes every check a new order passes. If it is refused, your order stays as it was.")
+                    Text(isTrailing ? "The new trailing stop starts from the latest price, as a new one does. If it is refused, your order stays as it was."
+                         : order.isBracketExit ? "This exit stays in its bracket and keeps the bracket's shares. If the new price is refused, your order stays as it was."
+                         : "The new order passes every check a new order passes. If it is refused, your order stays as it was.")
                 }
                 if let problem { Text(problem).foregroundStyle(.loss).font(.footnote) }
             }
@@ -476,6 +489,9 @@ struct ReplaceOrderSheet: View {
             limit = order.limitPrice.map(Show.plainNumber) ?? ""
             stop = order.stopPrice.map(Show.plainNumber) ?? ""
             tif = order.tif
+            trail = (order.trailPercent ?? order.trailAmount).map(Show.plainNumber) ?? ""
+            takeProfit = order.takeProfit.map(Show.plainNumber) ?? ""
+            bracketStop = order.bracketStop.map(Show.plainNumber) ?? ""
         }
     }
 
@@ -495,6 +511,11 @@ struct ReplaceOrderSheet: View {
         if hasLimit, limit != (order.limitPrice.map(Show.plainNumber) ?? "") { input.limitPrice = limit }
         if hasStop, stop != (order.stopPrice.map(Show.plainNumber) ?? "") { input.stopPrice = stop }
         if tif != order.tif { input.tif = tif }
+        if isTrailing, trail != ((order.trailPercent ?? order.trailAmount).map(Show.plainNumber) ?? "") {
+            if trailIsPercent { input.trailPercent = trail } else { input.trailAmount = trail }
+        }
+        if isBracketBuy, takeProfit != (order.takeProfit.map(Show.plainNumber) ?? "") { input.takeProfit = takeProfit }
+        if isBracketBuy, bracketStop != (order.bracketStop.map(Show.plainNumber) ?? "") { input.bracketStop = bracketStop }
         if input == ReplaceInput() { dismiss(); return }
         if await practice.replace(order, input) != nil { dismiss() } else { problem = practice.error }
     }

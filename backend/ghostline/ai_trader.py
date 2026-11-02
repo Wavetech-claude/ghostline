@@ -17,6 +17,7 @@ from typing import Any
 from ghostline import ledger, occ, risk_service
 from ghostline.db import Database
 from ghostline.ghost import Ghost
+from ghostline.invest import bracket_for
 from ghostline.ledger import Trade
 from ghostline.practice import Practice
 
@@ -273,7 +274,8 @@ def copy_trade(db: Database, trade_id: int, to: str) -> dict[str, Any]:
     ai_equity = p.facts(p.book_id("ai")).equity
     tgt_facts = p.facts(p.book_id(target))
     note = f"copied from AI trader trade #{trade_id}"
-    idea = db.fetch_one("SELECT stop FROM ideas WHERE id = %s", (t["idea_id"],)) if t.get("idea_id") else None
+    idea = (db.fetch_one("SELECT stop, target, lane FROM ideas WHERE id = %s", (t["idea_id"],))
+            if t.get("idea_id") else None)
     if t["asset"] == "option":
         qty = Decimal(1)
     elif t["side"] == "buy":
@@ -301,6 +303,8 @@ def copy_trade(db: Database, trade_id: int, to: str) -> dict[str, Any]:
                 "quantity": qty,
                 "option_symbol": t.get("option_symbol"),
                 "stop_loss": idea["stop"] if idea else None,
+                **(bracket_for(idea["lane"], idea["stop"], idea["target"]) if idea and t["side"] == "buy"
+                   and t["asset"] == "stock" else {}),
                 "note": note,
                 "idea_id": t.get("idea_id"),
                 "lane": t.get("lane"),
