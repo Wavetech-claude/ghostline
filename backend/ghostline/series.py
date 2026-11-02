@@ -28,9 +28,10 @@ def equity_series(db: Database, kind: str, end: dt.date | None = None) -> dict[s
     if not book:
         return {"book": kind, "points": [], "twr_pct": None}
     bid = book["id"]
-    flows = db.fetch_all("SELECT amount, at FROM cash_flows WHERE book_id = %s ORDER BY at, id", (bid,))
+    flows = db.fetch_all("SELECT amount, at FROM live_cash_flows WHERE book_id = %s ORDER BY at, id", (bid,))
     trades = db.fetch_all(
-        "SELECT ticker, asset, side, quantity, fill, fees, at FROM trades WHERE book_id = %s ORDER BY at, id", (bid,)
+        "SELECT ticker, asset, side, quantity, fill, fees, at FROM live_trades WHERE book_id = %s "
+        "ORDER BY at, id", (bid,)
     )
     if not flows:
         return {"book": kind, "points": [], "twr_pct": None}

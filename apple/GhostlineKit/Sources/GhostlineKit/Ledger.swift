@@ -19,6 +19,10 @@ public struct CashFlowRow: Codable, Sendable, Equatable, Identifiable {
     public let amount: String
     public let at: String
     public let note: String?
+    public let voidedAt: String?       // a voided entry stays, left out of every number
+    public let voidReason: String?
+
+    public var isVoided: Bool { voidedAt != nil }
 }
 
 public struct CashFlowInput: Codable, Sendable, Equatable {
@@ -52,6 +56,13 @@ public struct TradeRow: Codable, Sendable, Equatable, Identifiable {
     public let ideaId: Int?
     public let memoId: Int?
     public let attachments: Int
+    public let voidedAt: String?       // a voided trade stays, left out of every number
+    public let voidReason: String?
+
+    public var isVoided: Bool { voidedAt != nil }
+    /// The owner typed it in (buy, sell, an option leg); the rest are written by corporate actions and only voided.
+    public var isEditable: Bool { book == "real" && !isVoided && ["buy", "sell", "sell_to_open", "buy_to_close"].contains(side)
+        && broker != "corporate action" }
 }
 
 public struct TradeInput: Codable, Sendable, Equatable {
@@ -134,6 +145,7 @@ public struct History: Codable, Sendable, Equatable {
     public let closed: [ClosedTrade]
     public let open: [OpenPosition]
     public let totals: HistoryTotals
+    public let voided: [TradeRow]?     // only when asked for (include_voided)
 }
 
 public struct PortfolioPosition: Codable, Sendable, Equatable, Identifiable {
@@ -263,6 +275,10 @@ public struct TradeDetail: Codable, Sendable, Equatable {
     public let broker: String?
     public let note: String?
     public let lane: String?
+    public let optionSymbol: String?
+    public let voidedAt: String?
+    public let voidReason: String?
+    public let edits: [LedgerEdit]?
     public let attachmentList: [AttachmentRow]
 }
 

@@ -59,7 +59,7 @@ class Ghost:
         """Mirror every AI flow that has no ghost twin yet, oldest first."""
         ai_id, ghost_id = self._book("ai"), self._book("ghost")
         flows = self.db.fetch_all(
-            "SELECT f.* FROM cash_flows f LEFT JOIN ghost_links g ON g.ai_flow_id = f.id "
+            "SELECT f.* FROM live_cash_flows f LEFT JOIN ghost_links g ON g.ai_flow_id = f.id "
             "WHERE f.book_id = %s AND g.ai_flow_id IS NULL ORDER BY f.at, f.id",
             (ai_id,),
         )

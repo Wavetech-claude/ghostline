@@ -16,7 +16,7 @@ public struct OrderRow: Codable, Sendable, Equatable, Identifiable {
     public let stopPrice: String?
     public let stopLoss: String?
     public let optionSymbol: String?
-    public let status: String          // open | filled | cancelled | expired | refused
+    public let status: String          // open | filled | cancelled | expired | refused | replaced
     public let reason: String?
     public let triggered: Bool
     public let placedAt: String
@@ -24,6 +24,7 @@ public struct OrderRow: Codable, Sendable, Equatable, Identifiable {
     public let fillPrice: String?
     public let tradeId: Int?
     public let note: String?
+    public let replacesOrderId: Int?   // a replacement names the order it replaced
 
     public var isOpen: Bool { status == "open" }
     public var isRefused: Bool { status == "refused" }
@@ -80,6 +81,7 @@ public struct PendingSettlement: Codable, Sendable, Equatable, Identifiable {
 
 public struct PracticeAccount: Codable, Sendable, Equatable {
     public let book: String
+    public let lastReset: String?      // the day it was last reset (YYYY-MM-DD), if ever
     public let cash: String
     public let unsettled: String
     public let lockedCollateral: String

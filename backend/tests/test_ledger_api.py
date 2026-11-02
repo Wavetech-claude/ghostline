@@ -36,16 +36,18 @@ def test_trades_are_validated_and_filtered(client):
     assert ok.status_code == 201
     assert client.post("/trades", json={"book": "real", "ticker": "Y", "side": "buy", "quantity": "-1", "fill": "1",
                                         "at": "2026-10-03T14:30:00Z"}, headers=h).status_code == 422
-    client.post("/trades", json={"book": "real", "ticker": "Y", "side": "buy", "quantity": "2", "fill": "10",
-                                 "at": "2026-10-04T14:30:00Z", "lane": "swing"}, headers=h)
+    real_id = client.post("/trades", json={"book": "real", "ticker": "Y", "side": "buy", "quantity": "2", "fill": "10",
+                                           "at": "2026-10-04T14:30:00Z", "lane": "swing"}, headers=h).json()["id"]
     assert len(client.get("/trades?book=practice", headers=h).json()["trades"]) == 1
     assert len(client.get("/trades?lane=swing", headers=h).json()["trades"]) == 1
     assert len(client.get("/trades?asset=option", headers=h).json()["trades"]) == 1
     assert len(client.get("/trades?since=2026-10-04T00:00:00Z", headers=h).json()["trades"]) == 1
     tid = ok.json()["id"]
-    p = client.patch(f"/trades/{tid}", json={"fees": "0.65", "note": "filled at the ask"}, headers=h)
+    # a practice fill is never edited (reset the book instead); a real trade is (test_corrections has the rest)
+    assert client.patch(f"/trades/{tid}", json={"fees": "0.65"}, headers=h).status_code == 409
+    p = client.patch(f"/trades/{real_id}", json={"fees": "0.65", "note": "filled at the ask"}, headers=h)
     assert p.status_code == 200 and p.json()["fees"] == "0.65" and p.json()["note"] == "filled at the ask"
-    assert client.patch(f"/trades/{tid}", json={}, headers=h).status_code == 422
+    assert client.patch(f"/trades/{real_id}", json={}, headers=h).status_code == 422
     assert client.patch("/trades/999", json={"fees": "1"}, headers=h).status_code == 404
     assert client.get(f"/trades/{tid}", headers=h).json()["option_events"] == []
     assert client.get("/trades").status_code == 401

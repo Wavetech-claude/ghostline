@@ -10,15 +10,18 @@ public extension APIClient {
         try await post("/cash-flows", body: input, authenticated: true)
     }
 
-    func cashFlows(book: String? = nil) async throws -> [CashFlowRow] {
+    func cashFlows(book: String? = nil, includeVoided: Bool = false) async throws -> [CashFlowRow] {
         struct Answer: Decodable { let cashFlows: [CashFlowRow] }
-        let q = book.map { [URLQueryItem(name: "book", value: $0)] } ?? []
+        var q = book.map { [URLQueryItem(name: "book", value: $0)] } ?? []
+        if includeVoided { q.append(URLQueryItem(name: "include_voided", value: "true")) }
         return try await (get("/cash-flows", query: q, authenticated: true) as Answer).cashFlows
     }
 
-    func trades(_ filters: TradeFilters = TradeFilters()) async throws -> [TradeRow] {
+    func trades(_ filters: TradeFilters = TradeFilters(), includeVoided: Bool = false) async throws -> [TradeRow] {
         struct Answer: Decodable { let trades: [TradeRow] }
-        return try await (get("/trades", query: filters.queryItems, authenticated: true) as Answer).trades
+        var q = filters.queryItems
+        if includeVoided { q.append(URLQueryItem(name: "include_voided", value: "true")) }
+        return try await (get("/trades", query: q, authenticated: true) as Answer).trades
     }
 
     func addTrade(_ input: TradeInput) async throws -> TradeRow {
@@ -29,8 +32,10 @@ public extension APIClient {
         try await get("/trades/\(id)", authenticated: true)
     }
 
-    func history(_ filters: TradeFilters = TradeFilters()) async throws -> History {
-        try await get("/history", query: filters.queryItems, authenticated: true)
+    func history(_ filters: TradeFilters = TradeFilters(), includeVoided: Bool = false) async throws -> History {
+        var q = filters.queryItems
+        if includeVoided { q.append(URLQueryItem(name: "include_voided", value: "true")) }
+        return try await get("/history", query: q, authenticated: true)
     }
 
     func portfolio() async throws -> Portfolio {

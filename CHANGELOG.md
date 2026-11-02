@@ -2,6 +2,23 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.24.0] — unreleased
+
+- Fix a mistake without losing anything, the way the audit found real apps do it:
+  - **Your real book:** edit any field of a trade or a deposit (Account → Real Book Entries, or Edit Entries in
+    History). Every change is kept in the entry's history, old value and new.
+  - **Void instead of delete:** a voided trade or deposit stays in your records, struck through with your reason, and
+    leaves every number: positions, P&L, cash, statements, the value graph and the risk checks. Unvoid brings it back.
+    Turn on Show Voided to see them.
+  - A change that would leave a later sale selling more shares than you held is refused, and names the sale: void or
+    edit the sale first. An entry written by a corporate action can be voided, not edited.
+  - **Practice orders:** replace an open limit or stop order (swipe → Replace): new price, quantity or duration. The
+    new order passes every check a new one does; if it is refused, your order stays as it was.
+  - **Start over:** the practice, AI trader and options books each have Start Over, as a broker's paper account has.
+    Every trade and deposit in that book is voided (still there under Show Voided), its open orders are cancelled, and
+    the AI trader takes its S&P 500 ghost with it. You can add a fresh starting deposit. What the app has learned is
+    not affected: it learns from the ideas' paper results, not from the books.
+
 ## [0.23.0] — unreleased
 
 - Ticker changes and mergers, the way splits and dividends already work. When a stock you hold changes its ticker, or

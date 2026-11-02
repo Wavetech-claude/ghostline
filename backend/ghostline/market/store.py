@@ -151,7 +151,7 @@ def tracked_tickers(db: Database) -> list[str]:
     every open option leg."""
     rows = db.fetch_all("SELECT ticker FROM positions UNION SELECT ticker FROM watchlist UNION "
                         "SELECT ticker FROM alerts WHERE status = 'active' UNION "
-                        "SELECT ticker FROM trades WHERE asset = 'option' GROUP BY book_id, ticker, option_symbol "
+                        "SELECT ticker FROM live_trades WHERE asset = 'option' GROUP BY book_id, ticker, option_symbol "
                         "HAVING SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) > 0 ORDER BY 1")
     return [r["ticker"] for r in rows]
 
@@ -223,7 +223,7 @@ def tracked_option_symbols(db: Database) -> list[str]:
     """Every option with an open short leg or an open practice order: its quote is pulled with the stocks' (Tradier
     quotes option symbols; Alpaca does not)."""
     rows = db.fetch_all(
-        "SELECT option_symbol AS s FROM trades WHERE asset = 'option' GROUP BY book_id, option_symbol "
+        "SELECT option_symbol AS s FROM live_trades WHERE asset = 'option' GROUP BY book_id, option_symbol "
         "HAVING SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) > 0 "
         "UNION SELECT option_symbol FROM orders WHERE status = 'open' AND asset = 'option' ORDER BY 1")
     return [r["s"] for r in rows]

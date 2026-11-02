@@ -9,12 +9,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from ghostline import ledger, occ
+from ghostline import corrections, ledger, occ
 from ghostline.auth import OwnerSub
+from ghostline.ghost import Ghost
 from ghostline.market import NotConfigured, RateLimited, store, utcnow
 from ghostline.market.limits import Limiter
 from ghostline.market.sources import Tradier
-from ghostline.practice import Practice
+from ghostline.practice import Practice, ReplaceRefused
 
 router = APIRouter()
 
@@ -115,6 +116,59 @@ def cancel_order(order_id: int, request: Request, sub: str = OwnerSub) -> dict:
                              "WHERE o.id = %s", (order_id,)))
 
 
+class ReplaceIn(BaseModel):
+    """What a replacement may change; the order type, side, ticker and book stay (Robinhood's rule)."""
+    quantity: Decimal | None = Field(default=None, gt=0)
+    limit_price: Decimal | None = Field(default=None, gt=0)
+    stop_price: Decimal | None = Field(default=None, gt=0)
+    tif: str | None = Field(default=None, pattern="^(day|gtc)$")
+
+
+@router.post("/practice/orders/{order_id}/replace", status_code=201)
+def replace_order(order_id: int, body: ReplaceIn, request: Request, sub: str = OwnerSub) -> dict:
+    """Replace an open limit, stop or stop-limit order: the new order passes every check, then the old one ends
+    'replaced' in the same transaction. Refused (409) = the old order stays open, unchanged."""
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="nothing to change")
+    db = request.app.state.db
+    try:
+        new = Practice(db).replace(order_id, changes)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReplaceRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _row(db.fetch_one("SELECT o.*, b.kind AS book FROM orders o JOIN books b ON b.id = o.book_id "
+                             "WHERE o.id = %s", (new["id"],)))
+
+
+class ResetIn(BaseModel):
+    book: str = Field(pattern="^(practice|ai|options)$")
+    deposit: Decimal | None = Field(default=None, gt=0, description="a fresh starting deposit, optional")
+
+
+@router.post("/practice/reset")
+def reset_book(body: ResetIn, request: Request, sub: str = OwnerSub) -> dict:
+    """Start a practice, AI or options book over, as a paper account is reset: every trade and deposit of the book is
+    voided (kept, shown with "show voided"), open orders are cancelled, and the AI book takes its S&P 500 ghost with it.
+    Learning (module weights, graduation, lessons) is untouched: it reads paper results of ideas, not the books."""
+    db = request.app.state.db
+    try:
+        out = corrections.reset(db, body.book)
+    except corrections.Refused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if body.deposit is not None:
+        row = db.fetch_one("INSERT INTO cash_flows (book_id, amount, at, note) SELECT id, %s, now(), %s FROM books "
+                           "WHERE kind = %s RETURNING id", (ledger.money(body.deposit), "starting deposit after reset",
+                                                            body.book))
+        with db.connection() as conn:
+            conn.commit()
+        out["deposit_id"] = row["id"]
+        if body.book == "ai":
+            out["ghost_sync"] = Ghost(db).sync()
+    return out
+
+
 @router.get("/practice/account")
 def practice_account(request: Request, book: str = Query(default="practice", pattern="^(practice|ai|options)$"),
                      sub: str = OwnerSub) -> dict:
@@ -132,9 +186,10 @@ def practice_account(request: Request, book: str = Query(default="practice", pat
                          "collateral": str(ledger.money(o.collateral_per_contract * n))})
         except ValueError:
             legs.append({"option_symbol": symbol, "contracts": format(n.normalize(), "f")})
-    pending = db.fetch_all("SELECT s.trade_id, s.amount, s.settles_at FROM settlements s JOIN trades t "
+    pending = db.fetch_all("SELECT s.trade_id, s.amount, s.settles_at FROM settlements s JOIN live_trades t "
                            "ON t.id = s.trade_id WHERE t.book_id = %s AND NOT s.settled ORDER BY s.settles_at", (bid,))
-    return {"book": book, "cash": str(f.cash), "unsettled": str(f.unsettled),
+    return {"book": book, "last_reset": corrections.last_reset(db, book), "cash": str(f.cash),
+            "unsettled": str(f.unsettled),
             "locked_collateral": str(f.locked_collateral), "available": str(f.available), "equity": str(f.equity),
             "open_positions": f.open_positions, "paper_drawdown_share": str(f.paper_drawdown_share),
             "fee_per_order": str(ledger.money(p.fee())), "short_puts": legs,

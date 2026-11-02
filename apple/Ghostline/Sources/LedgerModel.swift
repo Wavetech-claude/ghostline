@@ -11,9 +11,12 @@ final class LedgerModel {
     private(set) var portfolio: Portfolio?
     private(set) var history: History?
     private(set) var rules: RiskRules?
+    private(set) var entries: [TradeRow] = []          // the real book's trades, newest first (Entries)
+    private(set) var flows: [CashFlowRow] = []         // the real book's deposits and withdrawals
     private(set) var error: String?
     private(set) var busy = false
     var filters = TradeFilters()
+    var showVoided = false            // History and Entries: list voided entries too, struck through
     var showingTradeForm = false      // the trade sheet, opened from History or the menu bar (⌘N)
     var showingCashFlow = false       // the cash sheet, opened from Account or the menu bar (⇧⌘N)
     var cashFlowBook: String?         // the book the cash sheet opens on (AI trader, options practice)
@@ -39,7 +42,49 @@ final class LedgerModel {
 
     func loadBooks() async { await run { self.books = try await self.client.books() } }
     func loadPortfolio() async { await run { self.portfolio = try await self.client.portfolio() } }
-    func loadHistory() async { await run { self.history = try await self.client.history(self.filters) } }
+    func loadHistory() async {
+        await run { self.history = try await self.client.history(self.filters, includeVoided: self.showVoided) }
+    }
+
+    func loadEntries() async {
+        await run {
+            self.entries = try await self.client.trades(TradeFilters(book: "real"), includeVoided: self.showVoided)
+            self.flows = try await self.client.cashFlows(book: "real", includeVoided: self.showVoided)
+        }
+    }
+
+    // ── corrections: the real book is edited or voided, never deleted ──
+    func editTrade(_ id: Int, _ changes: TradeChanges) async -> Bool {
+        await correct { try await self.client.editTrade(id: id, changes) }
+    }
+
+    func setVoided(trade id: Int, _ void: Bool, reason: String = "") async -> Bool {
+        await correct {
+            if void { try await self.client.voidTrade(id: id, reason: reason) } else { try await self.client.unvoidTrade(id: id) }
+        }
+    }
+
+    func editCashFlow(_ id: Int, _ changes: CashFlowChanges) async -> Bool {
+        await correct { try await self.client.editCashFlow(id: id, changes) }
+    }
+
+    func setVoided(flow id: Int, _ void: Bool, reason: String = "") async -> Bool {
+        await correct {
+            if void { try await self.client.voidCashFlow(id: id, reason: reason) } else { try await self.client.unvoidCashFlow(id: id) }
+        }
+    }
+
+    /// A correction, then every view that shows its numbers again.
+    private func correct(_ change: @escaping @MainActor () async throws -> Void) async -> Bool {
+        await run {
+            try await change()
+            self.entries = try await self.client.trades(TradeFilters(book: "real"), includeVoided: self.showVoided)
+            self.flows = try await self.client.cashFlows(book: "real", includeVoided: self.showVoided)
+            self.history = try await self.client.history(self.filters, includeVoided: self.showVoided)
+            self.portfolio = try await self.client.portfolio()
+            self.books = try await self.client.books()
+        }
+    }
     func loadRules() async { await run { self.rules = try await self.client.riskRules() } }
 
     func addCashFlow(book: String, amount: Decimal, at: Date, note: String?) async -> Bool {

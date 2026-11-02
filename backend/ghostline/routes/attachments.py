@@ -17,7 +17,7 @@ MAX_BYTES = 15 * 1024 * 1024
 @router.post("/attachments", status_code=201)
 async def upload(request: Request, trade_id: int, file: Annotated[UploadFile, File()], sub: str = OwnerSub) -> dict:
     db = request.app.state.db
-    if not db.fetch_one("SELECT 1 AS ok FROM trades WHERE id = %s", (trade_id,)):
+    if not db.fetch_one("SELECT 1 AS ok FROM live_trades WHERE id = %s", (trade_id,)):
         raise HTTPException(status_code=404, detail="no such trade")
     content_type = (file.content_type or "").lower()
     if content_type not in ALLOWED:
