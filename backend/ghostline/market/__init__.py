@@ -79,6 +79,9 @@ class Earning:
     at: dt.date
     estimate: Decimal | None
     actual: Decimal | None
+    hour: str | None = None                  # bmo (before the open), amc (after the close), dmh (during the session)
+    revenue_estimate: Decimal | None = None
+    revenue_actual: Decimal | None = None
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,18 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.26.0] — unreleased
+
+- **Earnings calendar** (Today → Earnings Calendar): report dates for the stocks you hold, watch or have an open idea
+  on, grouped by day, for the next two weeks, 30 or 90 days. A coming report shows when in the day the company reports
+  (before the open or after the close), the EPS estimate and how far the stock usually moved around its last four
+  reports; a report of the last week shows the actual against the estimate (beat or missed) and how the stock moved.
+  Every row opens the stock page.
+- **Analysts on the stock page:** the consensus (Buy, Hold, Sell), how the analysts split, and their price targets
+  (low, consensus, high) against the last close. From Finnhub's recommendation trends and FMP's consensus, both on the
+  free plans; each stock is asked at most once a week, and opening a stock nobody tracks asks once, in production.
+  These are other people's opinions, not Ghostline's call.
+
 ## [0.25.0] — unreleased
 
 - Intraday charts: **1D** shows today's session in 5-minute bars, **1W** the last five sessions in 30-minute bars, on

@@ -50,6 +50,16 @@ struct TodayView: View {
                 GetStartedCard(watching: watching)
                 PendingActionsCard()
                 BriefCard()
+                NavigationLink { EarningsCalendarView() } label: {
+                    ContentCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Earnings Calendar", systemImage: "calendar").font(.headline)
+                            Text("Report dates for your holdings, watchlist and ideas, with how each stock usually moves.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 if !todos.isEmpty {
                     NavigationLink { TodoListView() } label: {
                         ContentCard {

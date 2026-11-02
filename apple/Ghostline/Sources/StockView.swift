@@ -17,14 +17,15 @@ struct TickerView: View {
     @State private var timeframe = "6M"
     @State private var chart: ChartData?
     @State private var info: NewsAndEarnings?
+    @State private var analysts: AnalystViews?
     @State private var memos: Memos?
     @State private var holdings: [Holding] = []
     @State private var watched = false
     @State private var problem: String?
 
     var body: some View {
-        StockPage(ticker: ticker, timeframe: $timeframe, chart: chart, info: info, memos: memos, holdings: holdings,
-                  problem: problem)
+        StockPage(ticker: ticker, timeframe: $timeframe, chart: chart, info: info, analysts: analysts, memos: memos,
+                  holdings: holdings, problem: problem)
             .navigationTitle(ticker)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -74,6 +75,7 @@ struct TickerView: View {
 
     private func loadRest() async {
         info = try? await session.client.newsAndEarnings(ticker: ticker)
+        analysts = try? await session.client.analysts(ticker: ticker)
         memos = try? await session.client.memos(ticker: ticker)
         if let p = try? await session.client.portfolio() {
             holdings = p.books.flatMap { b in
@@ -114,14 +116,15 @@ struct StockPage: View {
     @Binding var timeframe: String
     let chart: ChartData?
     let info: NewsAndEarnings?
+    var analysts: AnalystViews? = nil
     let memos: Memos?
     let holdings: [Holding]
     let problem: String?
 
     var body: some View {
         ScrollView {
-            StockSections(ticker: ticker, timeframe: $timeframe, chart: chart, info: info, memos: memos,
-                          holdings: holdings, problem: problem)
+            StockSections(ticker: ticker, timeframe: $timeframe, chart: chart, info: info, analysts: analysts,
+                          memos: memos, holdings: holdings, problem: problem)
         }
     }
 }
@@ -135,6 +138,7 @@ struct StockSections: View {
     @Binding var timeframe: String
     let chart: ChartData?
     let info: NewsAndEarnings?
+    var analysts: AnalystViews? = nil
     let memos: Memos?
     let holdings: [Holding]
     let problem: String?
@@ -194,6 +198,9 @@ struct StockSections: View {
             }
             if let info, !info.earnings.isEmpty {
                 GhostCard(title: "Earnings") { EarningsLines(earnings: info.earnings) }
+            }
+            if let analysts, !analysts.isEmpty {
+                GhostCard(title: "Analysts") { AnalystLines(views: analysts, price: chart?.bars.last?.close) }
             }
             if let info, !info.news.isEmpty {
                 GhostCard(title: "News") {
@@ -462,7 +469,8 @@ struct EarningsLines: View {
         let next = earnings.filter { $0.at >= today }.min { $0.at < $1.at }
         let last = earnings.filter { $0.at < today }.max { $0.at < $1.at }
         if let next {
-            Figure(label: "Next report", value: "\(Stamp.day(next.at)) · estimate \(next.estimate ?? "—")")
+            let when = ReportHour.words(next.hour).map { " · \($0.lowercased())" } ?? ""
+            Figure(label: "Next report", value: "\(Stamp.day(next.at))\(when) · estimate \(next.estimate ?? "—")")
         }
         if let last {
             Figure(label: "Last report, \(Stamp.day(last.at))",
