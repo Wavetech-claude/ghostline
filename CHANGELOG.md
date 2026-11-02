@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.27.0] — unreleased
+
+- **Search as you type, Robinhood style.** Typing "n" lists the popular N stocks first (Nvidia, Netflix, Nike), and part
+  of a name finds a stock whose ticker you do not know ("net" finds Netflix, "bank of" finds Bank of New York Mellon).
+  What you hold or watch comes first, then the exact ticker, then the most traded (the average dollar volume of the
+  last 20 sessions). Funds (ETFs) are in, marked "ETF"; warrants, rights and units are left out.
+- The same suggestions appear wherever you type a ticker: the Search tab, a price alert, adding to the watchlist, the
+  practice order ticket, a real trade and your broker's holdings. Tap a suggestion to fill the field; a ticker the list
+  lacks can still be typed.
+- Behind it: the whole market's daily close and volume (one free call a session, the last 23 sessions kept filled, 100
+  days stored) and each ticker's type from Massive's ticker list, refreshed weekly. The morning scan's universe reads
+  the same daily file instead of asking again.
+
 ## [0.26.0] — unreleased
 
 - **Earnings calendar** (Today → Earnings Calendar): report dates for the stocks you hold, watch or have an open idea

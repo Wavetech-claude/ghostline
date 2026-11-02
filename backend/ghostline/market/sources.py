@@ -46,6 +46,8 @@ from ghostline.market import (
 UA = "Ghostline/0.2 (personal research tool; contact: owner)"
 REPORT_HOURS = ("bmo", "amc", "dmh")             # Finnhub: before the open, after the close, during the session
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
+TickerRef = tuple[str, str, str | None, str | None]   # Massive's ticker list: ticker, name, type, CIK
+MASSIVE_V3 = "https://api.massive.com/v3"           # Massive's reference data (ticker names and types)
 ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
 ACTION_KINDS = (("forward_split", "forward_splits"), ("reverse_split", "reverse_splits"),
                 ("cash_dividend", "cash_dividends"), ("name_change", "name_changes"), ("stock_merger", "stock_mergers"),
@@ -245,6 +247,20 @@ class Massive(Source):
             if ts and r.get("T"):
                 out[r["T"]] = Bar(ts, dec(r["o"]), dec(r["h"]), dec(r["l"]), dec(r["c"]), dec(r.get("v")) or Decimal(0))
         return out
+
+
+    def ticker_page(self, cursor: str | None = None) -> tuple[list[TickerRef], str | None]:
+        """One page (up to 1,000) of active US stock tickers: (ticker, name, type, cik), and the next page's cursor.
+        Types: CS common stock, ETF, ADRC, PFD, WARRANT, RIGHT, UNIT, FUND, ETN and a few more."""
+        params = {"market": "stocks", "active": "true", "limit": 1000}
+        if cursor:
+            params["cursor"] = cursor
+        j = self.fetch(MASSIVE_V3 + "/reference/tickers", params=params,
+                       headers={"Authorization": f"Bearer {self.key()}"})
+        rows = [(str(r["ticker"]).upper(), str(r.get("name") or r["ticker"])[:300], r.get("type"), r.get("cik"))
+                for r in (j.get("results") or []) if r.get("ticker")]
+        nxt = httpx.URL(j["next_url"]).params.get("cursor") if j.get("next_url") else None
+        return rows, nxt
 
 
 class FMP(Source):

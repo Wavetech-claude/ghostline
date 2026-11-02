@@ -28,6 +28,12 @@ import Testing
         #expect(none.isEmpty)
     }
 
+    @Test func searchMatchesDecodeWithAndWithoutTheirKind() throws {
+        let json = #"{"results":[{"ticker":"NVDA","name":"NVIDIA Corp","watched":false,"held":true,"kind":"CS"},{"ticker":"QQQ","name":"Invesco QQQ Trust","watched":true,"held":false,"kind":"ETF"},{"ticker":"OLD","name":"An older answer","watched":false}]}"#
+        let m = try GhostlineJSON.decoder().decode(TickerMatches.self, from: Data(json.utf8)).results
+        #expect(m[0].held == true && m[0].badge == nil && m[1].badge == "ETF" && m[2].kind == nil && m[2].held == nil)
+    }
+
     @Test func anOldEarningsRowStillDecodes() throws {
         let json = #"{"ticker":"AAPL","at":"2026-10-29","estimate":"1.0","actual":null,"source":"finnhub","as_of":"2026-10-30T00:00:00+00:00","move_pct":null}"#
         let e = try GhostlineJSON.decoder().decode(EarningsRow.self, from: Data(json.utf8))

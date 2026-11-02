@@ -304,10 +304,12 @@ public extension APIClient {
         try await get("/news-earnings", query: [URLQueryItem(name: "ticker", value: ticker)], authenticated: true)
     }
 
-    /// Stocks by ticker or company name, the exact ticker first (GET /market/search).
-    func searchTickers(_ query: String) async throws -> [TickerMatch] {
-        try await (get("/market/search", query: [URLQueryItem(name: "q", value: query)], authenticated: true)
-                   as TickerMatches).results
+    /// Search as you type (GET /market/search): a ticker prefix or a word of the name; held and watched first, then the
+    /// exact ticker, then the most traded. Warrants, rights and units only with `all`.
+    func searchTickers(_ query: String, limit: Int = 20, all: Bool = false) async throws -> [TickerMatch] {
+        var items = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
+        if all { items.append(URLQueryItem(name: "all", value: "true")) }
+        return try await (get("/market/search", query: items, authenticated: true) as TickerMatches).results
     }
 
     func watchlist() async throws -> [WatchRow] {
@@ -333,12 +335,36 @@ public extension APIClient {
     }
 }
 
-/// One search result: a listed stock, and whether the owner watches it.
+/// One search result: a listed stock or fund, whether the owner watches or holds it, and what it is (Massive's type:
+/// CS common stock, ETF, ADRC, ...; nil when no list typed it).
 public struct TickerMatch: Codable, Sendable, Equatable, Identifiable {
     public let ticker: String
     public let name: String
     public let watched: Bool
+    public let held: Bool?
+    public let kind: String?
     public var id: String { ticker }
+
+    public init(ticker: String, name: String, watched: Bool, held: Bool? = nil, kind: String? = nil) {
+        self.ticker = ticker
+        self.name = name
+        self.watched = watched
+        self.held = held
+        self.kind = kind
+    }
+
+    /// "ETF" for a fund, nothing for a common stock.
+    public var badge: String? {
+        switch kind {
+        case "ETF", "ETN", "ETV", "ETS", "FUND": "ETF"
+        case "ADRC": "ADR"
+        case "PFD": "Preferred"
+        case "WARRANT": "Warrant"
+        case "RIGHT": "Right"
+        case "UNIT": "Unit"
+        default: nil
+        }
+    }
 }
 
 public struct TickerMatches: Codable, Sendable, Equatable {

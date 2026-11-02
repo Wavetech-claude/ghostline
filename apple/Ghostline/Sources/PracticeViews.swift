@@ -179,11 +179,7 @@ struct OrderTicketView: View {
                 }
                 Section {
                     if asset == "stock" {
-                        TextField("Ticker", text: $ticker)
-                            #if os(iOS)
-                            .textInputAutocapitalization(.characters)
-                            #endif
-                            .autocorrectionDisabled()
+                        TickerField(title: "Ticker", ticker: $ticker)
                     } else {
                         TextField("Option symbol (OCC)", text: $optionSymbol).autocorrectionDisabled()
                     }
