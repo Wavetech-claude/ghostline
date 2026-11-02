@@ -297,7 +297,7 @@ struct OptionsChainView: View {
     var body: some View {
         List {
             if let ex = expirations, !ex.configured {
-                Text(ex.reason ?? "Option chains need the Tradier key.").foregroundStyle(.secondary)
+                Text(ex.reason ?? "Option chains need a data key: Tradier's, or Alpaca's in production.").foregroundStyle(.secondary)
             } else if let ex = expirations {
                 Section {
                     Picker("Expiration", selection: $expiry) {
@@ -305,7 +305,10 @@ struct OptionsChainView: View {
                     }
                     if let chain {
                         LabeledContent("Available for Collateral", value: Show.money(chain.available))
-                        Text("\(chain.source) · as of \(Stamp.short(chain.asOf))").font(.caption2).foregroundStyle(.tertiary)
+                        Text(chain.sourceLine).font(.caption2).foregroundStyle(.tertiary)
+                        if let note = chain.note {
+                            Text(note).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 if let chain {

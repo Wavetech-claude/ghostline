@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field, field_validator
 from ghostline import corrections, ledger, occ
 from ghostline.auth import OwnerSub
 from ghostline.ghost import Ghost
-from ghostline.market import NotConfigured, RateLimited, store, utcnow
+from ghostline.market import NotConfigured, RateLimited, greeks, store, utcnow
 from ghostline.market.limits import Limiter
-from ghostline.market.sources import Tradier
+from ghostline.market.sources import Alpaca, Tradier, configured
 from ghostline.practice import Practice, ReplaceRefused
 
 router = APIRouter()
@@ -208,35 +208,69 @@ def put_settings(body: SettingsIn, request: Request, sub: str = OwnerSub) -> dic
     return {"fee_per_order": str(ledger.money(body.fee_per_order))}
 
 
-# ── option chains (Tradier, counted) ───────────────────────────────────────────────────────────────────────
+# ── option chains: Tradier (the owner's account) when configured, else Alpaca's free indicative feed ──────────
+# Alpaca is asked in production only (staging pulls nothing; it reads production's stored chains), every call
+# counted against its limit. Alpaca's prices are indicative (its estimate, not the exchanges' quote), and IV and
+# delta are computed from them (market/greeks.py): the answer says so.
+EXPIRY_DAYS = 120          # the expiries offered from Alpaca: about four months out, enough for 30-45-day puts
+ALPACA_NOTE = "indicative (Alpaca): Alpaca's estimate of the price, not the exchanges' quote; IV and delta computed"
+
+
 def _tradier(request: Request) -> Tradier:
     made = getattr(request.app.state, "tradier", None)
     return made or Tradier()
 
 
-def _counted(db: Any, endpoint: str, fn, *args) -> tuple[Any, str | None]:
+def _alpaca(request: Request) -> Alpaca:
+    made = getattr(request.app.state, "alpaca", None)
+    return made or Alpaca()
+
+
+def _counted(db: Any, source: str, endpoint: str, fn, *args) -> tuple[Any, str | None]:
     lim = Limiter(db)
+    name = source.capitalize()
     try:
-        lim.check("tradier")
+        lim.check(source)
         result = fn(*args)
-        lim.record("tradier", endpoint, "ok", rows=len(result) if hasattr(result, "__len__") else 1)
+        lim.record(source, endpoint, "ok", rows=len(result) if hasattr(result, "__len__") else 1)
         return result, None
     except NotConfigured as exc:
-        lim.record("tradier", endpoint, "skipped", str(exc))
-        return None, "Tradier is not configured: add its key and the chains appear"
+        lim.record(source, endpoint, "skipped", str(exc))
+        return None, f"{name} is not configured: add its key and the chains appear"
     except RateLimited as exc:
-        lim.record("tradier", endpoint, "skipped", str(exc))
+        lim.record(source, endpoint, "skipped", str(exc))
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001 — the answer says what failed; nothing is guessed
-        lim.record("tradier", endpoint, "error", f"{type(exc).__name__}: {exc}")
-        return None, f"Tradier did not answer: {type(exc).__name__}"
+        lim.record(source, endpoint, "error", f"{type(exc).__name__}: {exc}")
+        return None, f"{name} did not answer: {type(exc).__name__}"
+
+
+def _chain_source(request: Request) -> str | None:
+    """Which source answers a chain now: Tradier when its key is set; else Alpaca in production; else none (the
+    stored chains, production's copy on staging)."""
+    if configured().get("tradier"):
+        return "tradier"
+    if configured().get("alpaca") and request.app.state.settings.is_production:
+        return "alpaca"
+    return None
 
 
 @router.get("/options/expirations")
 def expirations(request: Request, ticker: str, sub: str = OwnerSub) -> dict:
+    db = request.app.state.db
     t = ticker.strip().upper()
-    dates, why = _counted(request.app.state.db, "expirations", _tradier(request).expirations, t)
-    return {"ticker": t, "expirations": [d.isoformat() for d in dates or []], "configured": why is None, "reason": why}
+    source = _chain_source(request)
+    today = dt.date.today()
+    if source == "alpaca":
+        dates, why = _counted(db, "alpaca", "option-expirations", _alpaca(request).option_expirations, t, today,
+                              today + dt.timedelta(days=EXPIRY_DAYS))
+    elif source == "tradier":
+        dates, why = _counted(db, "tradier", "expirations", _tradier(request).expirations, t)
+    else:
+        dates = store.stored_expirations(db, t, today)
+        why = None if dates else "Options are not configured: add Tradier's key (Alpaca's answers in production)"
+    return {"ticker": t, "expirations": [d.isoformat() for d in dates or []], "configured": why is None,
+            "reason": why, "source": source or "stored", "indicative": source == "alpaca" or None}
 
 
 @router.get("/options/chain")
@@ -244,15 +278,27 @@ def chain(request: Request, ticker: str, expiry: dt.date,
           book: str = Query(default="practice", pattern="^(practice|ai|options)$"), sub: str = OwnerSub) -> dict:
     db = request.app.state.db
     t = ticker.strip().upper()
-    raw, why = _counted(db, "chain", _tradier(request).chain, t, expiry)
-    facts = Practice(db).facts(Practice(db).book_id(book))
+    source = _chain_source(request)
     as_of = utcnow()
-    rows = store.save_chain(db, raw or [], as_of)
+    if source == "alpaca":
+        raw, why = _counted(db, "alpaca", "option-chain", _alpaca(request).option_chain, t, expiry)
+        greeks.fill(raw or [], store.spot_of(db, t), dt.date.today())
+        rows = store.save_chain(db, raw or [], as_of, "alpaca")
+    elif source == "tradier":
+        raw, why = _counted(db, "tradier", "chain", _tradier(request).chain, t, expiry)
+        rows = store.save_chain(db, raw or [], as_of)
+    else:
+        rows = store.stored_chain(db, t, expiry)
+        why = None if rows else "Options are not configured: add Tradier's key (Alpaca's answers in production)"
+        as_of = max((r["as_of"] for r in rows), default=as_of)
+        source = rows[0]["source"] if rows else "stored"
+    facts = Practice(db).facts(Practice(db).book_id(book))
     out = []
     for r in sorted(rows, key=lambda x: (x["kind"], x["strike"])):
         collateral = r["strike"] * 100 if r["kind"] == "put" else None
         out.append({**_row(r), "collateral": str(collateral) if collateral is not None else None,
                     "covered": bool(collateral is not None and collateral <= facts.available)})
-    return {"ticker": t, "expiry": expiry.isoformat(), "configured": why is None, "reason": why, "source": "tradier",
+    return {"ticker": t, "expiry": expiry.isoformat(), "configured": why is None, "reason": why, "source": source,
+            "indicative": source == "alpaca" or None, "note": ALPACA_NOTE if source == "alpaca" else None,
             "as_of": as_of.isoformat() if rows else None, "available": str(facts.available), "book": book,
             "options": out}

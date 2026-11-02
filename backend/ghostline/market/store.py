@@ -290,9 +290,10 @@ def save_universe(db: Database, day: dt.date, rows: list[dict]) -> int:
     return n
 
 
-def save_chain(db: Database, raw: list[dict], as_of: dt.datetime) -> list[dict]:
-    """Parse a Tradier chain, store every option with its bid, ask, open interest, IV and delta, and keep each
-    option's bid and ask as its quote (a practice order fills against it). Returns the parsed rows."""
+def save_chain(db: Database, raw: list[dict], as_of: dt.datetime, source: str = "tradier") -> list[dict]:
+    """Parse a chain (Tradier's shape; Alpaca's is converted to it), store every option with its bid, ask, open
+    interest, IV and delta, and keep each option's bid and ask as its quote (a practice order fills against it).
+    Returns the parsed rows."""
     from ghostline import occ  # late: occ has no dependency on the store
     from ghostline.market import dec
 
@@ -313,13 +314,39 @@ def save_chain(db: Database, raw: list[dict], as_of: dt.datetime) -> list[dict]:
             for r in rows:
                 conn.execute("INSERT INTO option_chains (option_symbol, underlying, expiry, strike, kind, bid, ask, "
                              "last, volume, open_interest, iv, delta, source, as_of) VALUES (%s, %s, %s, %s, %s, %s, "
-                             "%s, %s, %s, %s, %s, %s, 'tradier', %s) ON CONFLICT DO NOTHING",
+                             "%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
                              (r["option_symbol"], r["underlying"], r["expiry"], r["strike"], r["kind"], r["bid"],
-                              r["ask"], r["last"], r["volume"], r["open_interest"], r["iv"], r["delta"], as_of))
+                              r["ask"], r["last"], r["volume"], r["open_interest"], r["iv"], r["delta"], source, as_of))
             conn.commit()
         save_quotes(db, [Quote(r["option_symbol"], r["bid"], r["ask"], r["last"], as_of, True) for r in rows],
-                    "tradier", as_of)
+                    source, as_of)
+        for r in rows:
+            r["source"] = source
     return rows
+
+
+def stored_chain(db: Database, ticker: str, expiry: dt.date) -> list[dict]:
+    """The latest stored snapshot of each option of one expiry (production's copy, on staging)."""
+    return db.fetch_all("SELECT DISTINCT ON (option_symbol) * FROM option_chains WHERE underlying = %s AND expiry = %s "
+                        "ORDER BY option_symbol, as_of DESC", (ticker, expiry))
+
+
+def stored_expirations(db: Database, ticker: str, since: dt.date) -> list[dt.date]:
+    return [r["expiry"] for r in db.fetch_all("SELECT DISTINCT expiry FROM option_chains WHERE underlying = %s "
+                                              "AND expiry >= %s ORDER BY expiry", (ticker, since))]
+
+
+def spot_of(db: Database, ticker: str) -> float | None:
+    """A stock's latest price for option math: its latest quote's mid (or last), else its last daily close."""
+    q = latest_quotes(db, [ticker]).get(ticker)
+    if q:
+        bid, ask, last = q.get("bid"), q.get("ask"), q.get("last")
+        if bid and ask:
+            return float((bid + ask) / 2)
+        if last:
+            return float(last)
+    b = bars(db, ticker, "1D", limit=1)
+    return float(b[-1]["close"]) if b else None
 
 
 def put_candidates(db: Database) -> list[str]:
@@ -332,8 +359,8 @@ def put_candidates(db: Database) -> list[str]:
 
 
 def tracked_option_symbols(db: Database) -> list[str]:
-    """Every option with an open short leg or an open practice order: its quote is pulled with the stocks' (Tradier
-    quotes option symbols; Alpaca does not)."""
+    """Every option with an open short leg or an open practice order: its quote is pulled with the stocks' (Tradier's
+    quotes take option symbols; without Tradier, Alpaca's indicative option snapshots price them)."""
     rows = db.fetch_all(
         "SELECT option_symbol AS s FROM live_trades WHERE asset = 'option' GROUP BY book_id, option_symbol "
         "HAVING SUM(CASE WHEN side = 'sell_to_open' THEN quantity ELSE -quantity END) > 0 "
