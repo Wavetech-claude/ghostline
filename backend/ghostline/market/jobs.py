@@ -22,6 +22,9 @@ TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
 PUT_DTE = (30, 45)
 
 
+INTRADAY_KEEP_DAYS = 10     # a 1-week chart needs 5 sessions; ten days covers a holiday week
+
+
 class Jobs:
     def __init__(self, db: Database, http: httpx.Client | None = None, sources: dict[str, Any] | None = None) -> None:
         self.db = db
@@ -66,6 +69,15 @@ class Jobs:
         bars = self._call("alpaca", "bars", self.sources["alpaca"].bars, ticker, end - dt.timedelta(days=days), end,
                           wait=False)
         return store.save_bars(self.db, ticker, "1D", bars, "alpaca", utcnow()) if bars else 0
+
+    def intraday_for(self, ticker: str, interval: str, start: dt.datetime, end: dt.datetime) -> int:
+        """One ticker's intraday bars (5Min or 30Min) for a chart the owner opened, now. Intraday bars older than
+        INTRADAY_KEEP_DAYS are removed for the ticker on the way, so the table never grows with every chart opened."""
+        bars = self._call("alpaca", "bars-" + interval, self.sources["alpaca"].bars, ticker, start, end, interval,
+                          wait=False)
+        saved = store.save_bars(self.db, ticker, interval, bars, "alpaca", utcnow()) if bars else 0
+        store.prune_intraday(self.db, ticker, INTRADAY_KEEP_DAYS)
+        return saved
 
     def pull_tickers(self) -> dict:
         """The ticker directory from the SEC's company list (one request, no key), for search and EDGAR's facts."""

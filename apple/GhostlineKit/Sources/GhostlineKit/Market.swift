@@ -13,8 +13,14 @@ public struct BarRow: Codable, Sendable, Equatable, Identifiable {
     public let volume: String
     public let source: String
     public let asOf: String
+    public let timeframe: String?          // "1D", or an intraday bar length: "5Min", "30Min"
 
-    public var date: Date? { Stamp.tradingDay(ts) }    // a daily bar: its session's day
+    /// A bar shorter than a day (the 1D and 1W charts).
+    public var isIntraday: Bool { timeframe.map { $0.hasSuffix("Min") || $0.hasSuffix("Hour") } ?? false }
+    /// The moment the bar starts.
+    public var instant: Date? { Stamp.date(ts) }
+    /// A daily bar: its session's day. An intraday bar: the moment it starts.
+    public var date: Date? { isIntraday ? instant : Stamp.tradingDay(ts) }
 }
 
 public struct Level: Codable, Sendable, Equatable, Identifiable {
@@ -49,13 +55,65 @@ public struct ChartData: Codable, Sendable, Equatable {
     public let macd: MACDLines
     public let bollinger: BollingerLines
     public let levels: [Level]
+    public let interval: String?           // "1Day", "5Min" (1D) or "30Min" (1W)
+    public let feed: String?               // "iex": live, IEX's share of the volume
+    public let delayed: Bool?
+    public let previousClose: String?      // intraday: the close before the latest session (the 1D baseline)
+    public let marketOpen: Bool?
 
-    /// (date, value) pairs for one indicator line, skipping the bars where it has no value yet.
+    public var isIntraday: Bool { interval.map { $0.hasSuffix("Min") || $0.hasSuffix("Hour") } ?? false }
+
+    /// Where each bar sits on the x axis. Daily bars: their day. Intraday bars: their moment, with the closed hours
+    /// between sessions taken out, so a week of 30-minute bars draws as one line instead of five islands separated by
+    /// nights and a weekend. The axis is hidden or labelled from the bars' own times wherever these are used.
+    public var plotDates: [Date?] {
+        guard isIntraday else { return bars.map(\.date) }
+        var out: [Date?] = []
+        var last: (real: Date, plot: Date)?
+        let step = Self.seconds(of: interval ?? "") ?? 300
+        for bar in bars {
+            guard let real = bar.instant else { out.append(nil); continue }
+            let plot = last.map { $0.plot.addingTimeInterval(min(real.timeIntervalSince($0.real), step)) } ?? real
+            out.append(plot)
+            last = (real, plot)
+        }
+        return out
+    }
+
+    /// The bar whose plotted x is nearest `x` (a finger dragging across the chart).
+    public func bar(nearest x: Date) -> BarRow? {
+        let plotted = zip(bars, plotDates).compactMap { bar, d in d.map { (bar, $0) } }
+        return plotted.min { abs($0.1.timeIntervalSince(x)) < abs($1.1.timeIntervalSince(x)) }?.0
+    }
+
+    /// The plotted x of a bar.
+    public func plotDate(of bar: BarRow) -> Date? {
+        guard let i = bars.firstIndex(where: { $0.ts == bar.ts }) else { return nil }
+        return plotDates[i]
+    }
+
+    static func seconds(of interval: String) -> TimeInterval? {
+        if interval.hasSuffix("Min"), let n = Double(interval.dropLast(3)) { return n * 60 }
+        if interval.hasSuffix("Hour"), let n = Double(interval.dropLast(4)) { return n * 3600 }
+        return nil
+    }
+
+    /// (x, value) pairs for one indicator line, skipping the bars where it has no value yet.
     public func line(_ values: [Double?]) -> [(Date, Double)] {
-        zip(bars, values).compactMap { bar, v in
-            guard let v, let d = bar.date else { return nil }
+        zip(plotDates, values).compactMap { d, v in
+            guard let v, let d else { return nil }
             return (d, v)
         }
+    }
+
+    /// The line under the chart's title: where the bars come from and how fresh they are.
+    public var sourceLine: String {
+        let src = source.map { $0 == "alpaca" ? "Alpaca" : $0 } ?? "?"
+        guard isIntraday else { return "\(src) · daily bars · as of \(Stamp.short(asOf))" }
+        let length = interval.map { $0.replacingOccurrences(of: "Min", with: "-min").replacingOccurrences(of: "Hour", with: "-hour") } ?? ""
+        let feedName = (feed ?? "").uppercased()
+        let time = asOf.flatMap(Stamp.date).map { $0.formatted(date: .omitted, time: .shortened) } ?? "?"
+        return "\(src) \(feedName) · \(length) bars · as of \(time)" + (marketOpen == true ? " · market open" : "")
     }
 }
 
