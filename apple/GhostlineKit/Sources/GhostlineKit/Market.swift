@@ -159,6 +159,85 @@ public struct EarningsRow: Codable, Sendable, Equatable, Identifiable {
     public let source: String
     public let asOf: String
     public let movePct: String?         // last close before the report to the first close after it
+    public var hour: String? = nil      // bmo (before the open), amc (after the close), dmh (during the session)
+    public var revenueEstimate: String? = nil
+    public var revenueActual: String? = nil
+}
+
+/// When in the day a company reports, in words.
+public enum ReportHour {
+    public static func words(_ hour: String?) -> String? {
+        switch hour {
+        case "bmo": "Before the open"
+        case "amc": "After the close"
+        case "dmh": "During the session"
+        default: nil
+        }
+    }
+}
+
+/// One report on the earnings calendar: a stock the owner holds, watches or has an open idea on.
+public struct CalendarEarning: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { "\(ticker)-\(at)" }
+    public let ticker: String
+    public let name: String?
+    public let at: String                  // the report's day, yyyy-MM-dd
+    public let hour: String?
+    public let estimate: String?
+    public let actual: String?
+    public let revenueEstimate: String?
+    public let revenueActual: String?
+    public let surprisePct: String?        // actual against the estimate, in percent
+    public let why: [String]               // held, watched, idea
+    public let movePct: String?            // a past report: how the stock moved around it
+    public let typicalMovePct: String?     // a coming report: the average size of the moves around the last four
+}
+
+public struct EarningsCalendar: Codable, Sendable, Equatable {
+    public let from: String
+    public let until: String
+    public let earnings: [CalendarEarning]
+
+    /// The reports grouped by day, in date order.
+    public var days: [(day: String, reports: [CalendarEarning])] {
+        Dictionary(grouping: earnings, by: \.at).sorted { $0.key < $1.key }.map { (day: $0.key, reports: $0.value) }
+    }
+}
+
+/// One month of Finnhub's recommendation trends: how many analysts say each grade.
+public struct AnalystTrend: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { period }
+    public let period: String
+    public let strongBuy: Int
+    public let buy: Int
+    public let hold: Int
+    public let sell: Int
+    public let strongSell: Int
+    public var total: Int { strongBuy + buy + hold + sell + strongSell }
+}
+
+/// FMP's grade consensus and price targets.
+public struct AnalystConsensus: Codable, Sendable, Equatable {
+    public let strongBuy: Int?
+    public let buy: Int?
+    public let hold: Int?
+    public let sell: Int?
+    public let strongSell: Int?
+    public let consensus: String?
+    public let targetHigh: String?
+    public let targetLow: String?
+    public let targetConsensus: String?
+    public let targetMedian: String?
+    public let source: String
+    public let asOf: String
+}
+
+public struct AnalystViews: Codable, Sendable, Equatable {
+    public let ticker: String
+    public let trends: [AnalystTrend]
+    public let consensus: AnalystConsensus?
+
+    public var isEmpty: Bool { trends.isEmpty && consensus == nil }
 }
 
 public struct FilingRow: Codable, Sendable, Equatable, Identifiable {
@@ -209,6 +288,16 @@ public extension APIClient {
     func quotes(_ tickers: [String]) async throws -> Quotes {
         try await get("/quotes", query: [URLQueryItem(name: "tickers", value: tickers.joined(separator: ","))],
                       authenticated: true)
+    }
+
+    /// Reports of what the owner holds, watches or has an open idea on (GET /earnings/calendar).
+    func earningsCalendar(days: Int = 30) async throws -> EarningsCalendar {
+        try await get("/earnings/calendar", query: [URLQueryItem(name: "days", value: String(days))], authenticated: true)
+    }
+
+    /// Analysts' recommendation trends, grade consensus and price targets for one stock (GET /analysts).
+    func analysts(ticker: String) async throws -> AnalystViews {
+        try await get("/analysts", query: [URLQueryItem(name: "ticker", value: ticker)], authenticated: true)
     }
 
     func newsAndEarnings(ticker: String) async throws -> NewsAndEarnings {

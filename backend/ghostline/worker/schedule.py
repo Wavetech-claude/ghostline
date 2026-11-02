@@ -32,7 +32,7 @@ PT = "America/Los_Angeles"
 # every job that calls a data source; staging has none of them (see the module's docstring)
 PULLS = ("pull_calendar", "pull_macro", "pull_tone", "pull_tickers", "build_universe", "pull_eps_history",
          "pull_bars", "pull_corporate_actions",
-         "pull_news_earnings", "pull_fundamentals", "pull_chains", "pull_quotes")
+         "pull_news_earnings", "pull_fundamentals", "pull_analysts", "pull_chains", "pull_quotes")
 
 
 def register(
@@ -110,6 +110,8 @@ def register(
         ("apply_corporate_actions", apply_corporate_actions, CronTrigger(hour=5, minute=25, timezone=PT)),
         ("pull_news_earnings", j.pull_news_earnings, CronTrigger(hour=6, minute=0, timezone=PT)),
         ("pull_fundamentals", j.pull_fundamentals, CronTrigger(hour=6, minute=10, timezone=PT)),
+        # analysts' views: each stock at most once a week per source, after fundamentals took their FMP calls
+        ("pull_analysts", j.pull_analysts, CronTrigger(day_of_week="mon-fri", hour=6, minute=14, timezone=PT)),
         ("pull_chains", j.pull_chains, CronTrigger(day_of_week="mon-fri", hour=6, minute=12, timezone=PT)),
         ("scan_ideas", scan_ideas, CronTrigger(day_of_week="mon-fri", hour=6, minute=20, timezone=PT)),
         ("pull_quotes", j.pull_quotes, CronTrigger(day_of_week="mon-fri", hour="6-13", minute="0,30", timezone=PT)),

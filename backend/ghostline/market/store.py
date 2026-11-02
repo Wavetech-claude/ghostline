@@ -57,14 +57,115 @@ def save_news(db: Database, items: list[NewsItem], source: str, as_of: dt.dateti
 def save_earnings(db: Database, rows: list[Earning], source: str, as_of: dt.datetime) -> int:
     with db.connection() as conn:
         for e in rows:
-            conn.execute("INSERT INTO earnings (ticker, at, estimate, actual, source, as_of) "
-                         "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (ticker, at) DO UPDATE SET "
+            conn.execute("INSERT INTO earnings (ticker, at, estimate, actual, hour, revenue_estimate, revenue_actual, "
+                         "source, as_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                         "ON CONFLICT (ticker, at) DO UPDATE SET "
                          "estimate = COALESCE(EXCLUDED.estimate, earnings.estimate), "
-                         "actual = COALESCE(EXCLUDED.actual, earnings.actual), source = EXCLUDED.source, "
-                         "as_of = EXCLUDED.as_of",
-                         (e.ticker, e.at, e.estimate, e.actual, source, as_of))
+                         "actual = COALESCE(EXCLUDED.actual, earnings.actual), "
+                         "hour = COALESCE(EXCLUDED.hour, earnings.hour), "
+                         "revenue_estimate = COALESCE(EXCLUDED.revenue_estimate, earnings.revenue_estimate), "
+                         "revenue_actual = COALESCE(EXCLUDED.revenue_actual, earnings.revenue_actual), "
+                         "source = EXCLUDED.source, as_of = EXCLUDED.as_of",
+                         (e.ticker, e.at, e.estimate, e.actual, e.hour, e.revenue_estimate, e.revenue_actual,
+                          source, as_of))
         conn.commit()
     return len(rows)
+
+
+def idea_tickers(db: Database) -> list[str]:
+    """The stocks of ideas still on offer (proposed) or taken and running (open)."""
+    rows = db.fetch_all("SELECT DISTINCT ticker FROM ideas WHERE status IN ('proposed', 'open') ORDER BY 1")
+    return [r["ticker"] for r in rows]
+
+
+def held_tickers(db: Database) -> set[str]:
+    return {r["ticker"] for r in db.fetch_all("SELECT DISTINCT ticker FROM positions")}
+
+
+def watched_tickers(db: Database) -> set[str]:
+    return {r["ticker"] for r in db.fetch_all("SELECT ticker FROM watchlist")}
+
+
+def ticker_names(db: Database, tickers: list[str]) -> dict[str, str]:
+    if not tickers:
+        return {}
+    rows = db.fetch_all("SELECT ticker, name FROM tickers WHERE ticker = ANY(%s)", (tickers,))
+    return {r["ticker"]: r["name"] for r in rows}
+
+
+def earnings_between(db: Database, tickers: list[str], since: dt.date, until: dt.date) -> list[dict]:
+    if not tickers:
+        return []
+    return db.fetch_all("SELECT * FROM earnings WHERE ticker = ANY(%s) AND at BETWEEN %s AND %s ORDER BY at, ticker",
+                        (tickers, since, until))
+
+
+def past_earnings(db: Database, tickers: list[str], before: dt.date, per_ticker: int = 4) -> dict[str, list[dt.date]]:
+    """Each stock's last report dates before a day, newest first, at most `per_ticker` each."""
+    if not tickers:
+        return {}
+    rows = db.fetch_all("SELECT ticker, at FROM (SELECT ticker, at, row_number() OVER (PARTITION BY ticker ORDER BY at "
+                        "DESC) AS n FROM earnings WHERE ticker = ANY(%s) AND at < %s) x WHERE n <= %s ORDER BY ticker, "
+                        "at DESC", (tickers, before, per_ticker))
+    out: dict[str, list[dt.date]] = {}
+    for r in rows:
+        out.setdefault(r["ticker"], []).append(r["at"])
+    return out
+
+
+def analyst_pulled_at(db: Database, ticker: str, source: str) -> dt.datetime | None:
+    row = db.fetch_one("SELECT at FROM analyst_pulls WHERE ticker = %s AND source = %s", (ticker, source))
+    return row["at"] if row else None
+
+
+def mark_analyst_pull(db: Database, ticker: str, source: str, rows: int) -> None:
+    db.execute("INSERT INTO analyst_pulls (ticker, source, at, rows) VALUES (%s, %s, now(), %s) "
+               "ON CONFLICT (ticker, source) DO UPDATE SET at = now(), rows = EXCLUDED.rows", (ticker, source, rows))
+
+
+def save_analyst_trends(db: Database, ticker: str, rows: list[dict], source: str, as_of: dt.datetime) -> int:
+    with db.connection() as conn:
+        for r in rows:
+            conn.execute("INSERT INTO analyst_trends (ticker, period, strong_buy, buy, hold, sell, strong_sell, "
+                         "source, as_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                         "ON CONFLICT (ticker, period) DO UPDATE SET "
+                         "strong_buy = EXCLUDED.strong_buy, buy = EXCLUDED.buy, hold = EXCLUDED.hold, "
+                         "sell = EXCLUDED.sell, strong_sell = EXCLUDED.strong_sell, source = EXCLUDED.source, "
+                         "as_of = EXCLUDED.as_of",
+                         (ticker, r["period"], r["strong_buy"], r["buy"], r["hold"], r["sell"], r["strong_sell"],
+                          source, as_of))
+        conn.commit()
+    return len(rows)
+
+
+def save_analyst_consensus(db: Database, ticker: str, grades: dict | None, targets: dict | None, source: str,
+                           as_of: dt.datetime) -> None:
+    """One row per stock; a part that did not answer keeps what was stored."""
+    g, t = grades or {}, targets or {}
+    db.execute("INSERT INTO analyst_consensus (ticker, strong_buy, buy, hold, sell, strong_sell, consensus, "
+               "target_high, target_low, target_consensus, target_median, source, as_of) "
+               "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (ticker) DO UPDATE SET "
+               "strong_buy = COALESCE(EXCLUDED.strong_buy, analyst_consensus.strong_buy), "
+               "buy = COALESCE(EXCLUDED.buy, analyst_consensus.buy), "
+               "hold = COALESCE(EXCLUDED.hold, analyst_consensus.hold), "
+               "sell = COALESCE(EXCLUDED.sell, analyst_consensus.sell), "
+               "strong_sell = COALESCE(EXCLUDED.strong_sell, analyst_consensus.strong_sell), "
+               "consensus = COALESCE(EXCLUDED.consensus, analyst_consensus.consensus), "
+               "target_high = COALESCE(EXCLUDED.target_high, analyst_consensus.target_high), "
+               "target_low = COALESCE(EXCLUDED.target_low, analyst_consensus.target_low), "
+               "target_consensus = COALESCE(EXCLUDED.target_consensus, analyst_consensus.target_consensus), "
+               "target_median = COALESCE(EXCLUDED.target_median, analyst_consensus.target_median), "
+               "source = EXCLUDED.source, as_of = EXCLUDED.as_of",
+               (ticker, g.get("strong_buy"), g.get("buy"), g.get("hold"), g.get("sell"), g.get("strong_sell"),
+                g.get("consensus"), t.get("target_high"), t.get("target_low"), t.get("target_consensus"),
+                t.get("target_median"), source, as_of))
+
+
+def analysts_for(db: Database, ticker: str, months: int = 4) -> dict:
+    trends = db.fetch_all("SELECT period, strong_buy, buy, hold, sell, strong_sell, source, as_of FROM analyst_trends "
+                          "WHERE ticker = %s ORDER BY period DESC LIMIT %s", (ticker, months))
+    consensus = db.fetch_one("SELECT * FROM analyst_consensus WHERE ticker = %s", (ticker,))
+    return {"trends": trends, "consensus": consensus}
 
 
 def save_filings(db: Database, rows: list[Filing], source: str, as_of: dt.datetime) -> int:

@@ -1,5 +1,5 @@
-"""Charts, quotes, news and earnings, the watchlist, and the market status (which sources are configured and when
-they last answered). Every price carries its source and time."""
+"""Charts, quotes, news and earnings, the earnings calendar, analysts' views, the watchlist, and the market status
+(which sources are configured and when they last answered). Every price carries its source and time."""
 from __future__ import annotations
 
 import datetime as dt
@@ -150,6 +150,72 @@ def news_earnings(request: Request, ticker: str, sub: str = OwnerSub) -> dict:
         e["move_pct"] = _move_around(closes, dt.date.fromisoformat(str(e["at"])[:10]))
     return {"ticker": t, "news": store.as_json(store.news_for(db, t)), "earnings": earnings,
             "filings": store.as_json(store.filings_for(db, t))}
+
+
+@router.get("/earnings/calendar")
+def earnings_calendar(request: Request, days: int = Query(default=30, ge=1, le=90),
+                      past: int = Query(default=7, ge=0, le=30), sub: str = OwnerSub) -> dict:
+    """Reports of the stocks the owner holds, watches or has an open idea on: the last `past` days (with the actual
+    against the estimate and how the stock moved) and the next `days` (with the estimate and how far the stock
+    usually moved around its last four reports). Rows are in date order; the app groups them by day."""
+    db = request.app.state.db
+    today = dt.date.today()
+    held, watched, ideas = store.held_tickers(db), store.watched_tickers(db), set(store.idea_tickers(db))
+    tickers = sorted((held | watched | ideas) - set(store.MARKET_TICKERS))
+    rows = store.earnings_between(db, tickers, today - dt.timedelta(days=past), today + dt.timedelta(days=days))
+    names = store.ticker_names(db, tickers)
+    shown = sorted({r["ticker"] for r in rows})
+    closes = {t: [(b["ts"].date(), b["close"]) for b in store.bars(db, t, "1D", limit=2000)] for t in shown}
+    history = store.past_earnings(db, shown, today)
+    out = []
+    for r in rows:
+        t, day = r["ticker"], r["at"]
+        why = [w for w, s in (("held", held), ("watched", watched), ("idea", ideas)) if t in s]
+        row = {"ticker": t, "name": names.get(t), "at": day.isoformat(), "hour": r["hour"],
+               "estimate": _s(r["estimate"]), "actual": _s(r["actual"]),
+               "revenue_estimate": _s(r["revenue_estimate"]), "revenue_actual": _s(r["revenue_actual"]),
+               "surprise_pct": _surprise(r["estimate"], r["actual"]), "why": why, "move_pct": None,
+               "typical_move_pct": None}
+        if day < today:
+            row["move_pct"] = _move_around(closes[t], day)
+        else:
+            moves = [m for d in history.get(t, []) if (m := _move_around(closes[t], d)) is not None]
+            if moves:
+                avg = sum(abs(Decimal(m)) for m in moves) / len(moves)
+                row["typical_move_pct"] = str(avg.quantize(Decimal("0.01")))
+        out.append(row)
+    since, until = today - dt.timedelta(days=past), today + dt.timedelta(days=days)
+    return {"from": since.isoformat(), "until": until.isoformat(), "earnings": out}
+
+
+def _s(v: Any) -> str | None:
+    return None if v is None else str(v)
+
+
+def _surprise(estimate: Any, actual: Any) -> str | None:
+    """How far the actual EPS beat (positive) or missed the estimate, in percent of the estimate's size."""
+    if estimate is None or actual is None or Decimal(estimate) == 0:
+        return None
+    pct = (Decimal(actual) - Decimal(estimate)) / abs(Decimal(estimate)) * 100
+    return str(pct.quantize(Decimal("0.01")))
+
+
+@router.get("/analysts")
+def analysts(request: Request, ticker: str, sub: str = OwnerSub) -> dict:
+    """Analysts' views of one stock: Finnhub's recommendation trends (the last four months) and FMP's grade consensus
+    and price targets. Missing or a week old for a stock the owner opened: asked now, in production only."""
+    db = request.app.state.db
+    t = ticker.upper()
+    if request.app.state.settings.is_production and SYMBOL.match(t) and t not in store.MARKET_TICKERS:
+        Jobs(db).analysts_now(t)
+    got = store.analysts_for(db, t)
+    c = got["consensus"]
+    return {"ticker": t, "trends": store.as_json(got["trends"]),
+            "consensus": None if not c else {k: _s(c[k]) if k.startswith("target") else c[k]
+                                            for k in ("strong_buy", "buy", "hold", "sell", "strong_sell", "consensus",
+                                                      "target_high", "target_low", "target_consensus",
+                                                      "target_median")} | {"source": c["source"],
+                                                                           "as_of": c["as_of"].isoformat()}}
 
 
 def _move_around(closes: list[tuple[dt.date, Any]], day: dt.date) -> str | None:

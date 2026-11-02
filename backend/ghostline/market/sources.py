@@ -44,6 +44,7 @@ from ghostline.market import (
 )
 
 UA = "Ghostline/0.2 (personal research tool; contact: owner)"
+REPORT_HOURS = ("bmo", "amc", "dmh")             # Finnhub: before the open, after the close, during the session
 TRADING = "https://paper-api.alpaca.markets/v2"     # Alpaca's trading API, where the calendar lives
 ALPACA_V1 = "https://data.alpaca.markets/v1"         # Alpaca's corporate actions
 ACTION_KINDS = (("forward_split", "forward_splits"), ("reverse_split", "reverse_splits"),
@@ -268,6 +269,25 @@ class FMP(Source):
         return [{"date": r.get("date"), "eps": r.get("eps"), "revenue": r.get("revenue")} for r in (j or [])
                 if isinstance(r, dict)]
 
+    def grades_consensus(self, ticker: str) -> dict:
+        """How many analysts grade the stock strong buy to strong sell, and FMP's one-word consensus; {} when FMP has
+        none (a fund, a small company)."""
+        j = self.get("/grades-consensus", params={"symbol": ticker}, headers=self._headers())
+        r = (j[0] if isinstance(j, list) and j else j) or None
+        if not isinstance(r, dict) or not r:
+            return {}
+        return {"strong_buy": r.get("strongBuy"), "buy": r.get("buy"), "hold": r.get("hold"), "sell": r.get("sell"),
+                "strong_sell": r.get("strongSell"), "consensus": r.get("consensus")}
+
+    def price_targets(self, ticker: str) -> dict:
+        """Analysts' price targets: the highest, the lowest, the consensus and the median; {} when FMP has none."""
+        j = self.get("/price-target-consensus", params={"symbol": ticker}, headers=self._headers())
+        r = (j[0] if isinstance(j, list) and j else j) or None
+        if not isinstance(r, dict) or not r:
+            return {}
+        return {"target_high": dec(r.get("targetHigh")), "target_low": dec(r.get("targetLow")),
+                "target_consensus": dec(r.get("targetConsensus")), "target_median": dec(r.get("targetMedian"))}
+
     def earnings(self, ticker: str) -> list[Earning]:
         """The last reports, newest first. The free plan refuses a limit above 5 (402), and some symbols outright."""
         j = self.get("/earnings", params={"symbol": ticker, "limit": 5}, headers=self._headers())
@@ -293,10 +313,23 @@ class Finnhub(Source):
         return out
 
     def earnings(self, ticker: str, since: dt.date, until: dt.date) -> list[Earning]:
+        """Report dates with the EPS estimate and actual, when in the day the company reports ("hour": bmo, amc or
+        dmh; empty when not announced) and the revenue estimate and actual."""
         j = self.get("/calendar/earnings", params={"symbol": ticker, "from": since.isoformat(),
                                                    "to": until.isoformat()}, headers=self._headers())
-        return [Earning(ticker, d, dec(e.get("epsEstimate")), dec(e.get("epsActual")))
+        return [Earning(ticker, d, dec(e.get("epsEstimate")), dec(e.get("epsActual")),
+                        e.get("hour") if e.get("hour") in REPORT_HOURS else None,
+                        dec(e.get("revenueEstimate")), dec(e.get("revenueActual")))
                 for e in (j.get("earningsCalendar") or []) if (d := _date(e.get("date")))]
+
+    def recommendations(self, ticker: str) -> list[dict]:
+        """Analysts' recommendation trends, one row per month: how many say strong buy, buy, hold, sell and strong
+        sell (free plan). Finnhub's price targets need a paid plan (403), so they come from FMP."""
+        j = self.get("/stock/recommendation", params={"symbol": ticker}, headers=self._headers())
+        return [{"period": d, "strong_buy": int(r.get("strongBuy") or 0), "buy": int(r.get("buy") or 0),
+                 "hold": int(r.get("hold") or 0), "sell": int(r.get("sell") or 0),
+                 "strong_sell": int(r.get("strongSell") or 0)}
+                for r in (j if isinstance(j, list) else []) if isinstance(r, dict) and (d := _date(r.get("period")))]
 
     def quote(self, ticker: str) -> Quote | None:
         q = self.get("/quote", params={"symbol": ticker}, headers=self._headers())

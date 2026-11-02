@@ -20,6 +20,9 @@ MACRO_SERIES = ("DGS10", "DGS2", "CPIAUCSL", "DEXINUS", "UNRATE", "FEDFUNDS")   
 # GDELT world news tone for the brief's backdrop (no key): one topic per run of pull_tone, see there
 TONE_QUERIES = ("\"stock market\"", "\"India economy\"", "\"Federal Reserve\"")
 PUT_DTE = (30, 45)
+ANALYST_FRESH_DAYS = 7         # analysts' views move slowly: each stock is asked at most once a week per source
+ANALYST_FMP_CAP = 60           # FMP calls one morning run may spend on analysts (2 a stock) of the day's 250
+ANALYST_FMP_RESERVE = 200      # a stock page opened on demand asks FMP only below this many calls today
 
 
 INTRADAY_KEEP_DAYS = 10     # a 1-week chart needs 5 sessions; ten days covers a holiday week
@@ -124,7 +127,8 @@ class Jobs:
         today = dt.date.today()
         out = {"news": 0, "earnings": 0, "filings": 0}
         tracked = set(store.tracked_tickers(self.db))
-        for ticker in store.scan_tickers(self.db):
+        # report dates also for open ideas, which may outlive the day's universe (the earnings calendar lists them)
+        for ticker in sorted(set(store.scan_tickers(self.db)) | set(store.idea_tickers(self.db))):
             if ticker in store.MARKET_TICKERS:
                 continue
             cal = self._call("finnhub", "calendar/earnings", finnhub.earnings, ticker, today - dt.timedelta(days=90),
@@ -143,6 +147,64 @@ class Jobs:
             if filings:
                 out["filings"] += store.save_filings(self.db, filings, "edgar", utcnow())
         return out
+
+    def analyst_tickers(self) -> list[str]:
+        """Whose analysts' views are kept fresh: what the owner holds or watches, and open ideas (not the market
+        ETFs)."""
+        found = set(store.tracked_tickers(self.db)) | set(store.idea_tickers(self.db))
+        return sorted(found - set(store.MARKET_TICKERS))
+
+    def pull_analysts(self, fresh_days: int = ANALYST_FRESH_DAYS, fmp_cap: int = ANALYST_FMP_CAP) -> dict:
+        """Analysts' views, at most once a week per stock and source: Finnhub's recommendation trends (free, 60 a
+        minute) and FMP's grade consensus and price targets (two calls a stock from FMP's 250 a day, at most `fmp_cap`
+        calls a run so news, earnings history and fundamentals keep theirs)."""
+        out = {"tickers": 0, "finnhub": 0, "fmp": 0, "fresh": 0}
+        fmp_calls = 0
+        for ticker in self.analyst_tickers():
+            did = False
+            if self._stale(ticker, "finnhub", fresh_days):
+                did |= self._finnhub_trends(ticker, wait=True)
+                out["finnhub"] += 1
+            if self._stale(ticker, "fmp", fresh_days) and fmp_calls + 2 <= fmp_cap:
+                did |= self._fmp_consensus(ticker, wait=True)
+                fmp_calls += 2
+                out["fmp"] += 1
+            out["tickers" if did else "fresh"] += 1
+        return out
+
+    def analysts_now(self, ticker: str, fresh_days: int = ANALYST_FRESH_DAYS) -> bool:
+        """A stock the owner opened whose views are missing or a week old: asked now, never waiting out a minute.
+        FMP is asked only while the day's calls stay under ANALYST_FMP_RESERVE, so a browsing session cannot eat the
+        calls the morning pulls need."""
+        asked = False
+        if self._stale(ticker, "finnhub", fresh_days):
+            asked |= self._finnhub_trends(ticker, wait=False)
+        if self._stale(ticker, "fmp", fresh_days) and self.limiter.used("fmp", 86400) < ANALYST_FMP_RESERVE:
+            asked |= self._fmp_consensus(ticker, wait=False)
+        return asked
+
+    def _stale(self, ticker: str, source: str, fresh_days: int) -> bool:
+        at = store.analyst_pulled_at(self.db, ticker, source)
+        return at is None or utcnow() - at >= dt.timedelta(days=fresh_days)
+
+    def _finnhub_trends(self, ticker: str, wait: bool) -> bool:
+        rows = self._call("finnhub", "stock/recommendation", self.sources["finnhub"].recommendations, ticker, wait=wait)
+        if rows is None:
+            return False                    # not configured, limited or failed: asked again on the next run
+        store.save_analyst_trends(self.db, ticker, rows, "finnhub", utcnow())
+        store.mark_analyst_pull(self.db, ticker, "finnhub", len(rows))
+        return True
+
+    def _fmp_consensus(self, ticker: str, wait: bool) -> bool:
+        fmp: FMP = self.sources["fmp"]
+        grades = self._call("fmp", "grades-consensus", fmp.grades_consensus, ticker, wait=wait)
+        targets = self._call("fmp", "price-target-consensus", fmp.price_targets, ticker, wait=wait)
+        if grades is None and targets is None:
+            return False                    # both failed or were refused: asked again on the next run
+        if grades or targets:
+            store.save_analyst_consensus(self.db, ticker, grades, targets, "fmp", utcnow())
+        store.mark_analyst_pull(self.db, ticker, "fmp", int(bool(grades)) + int(bool(targets)))
+        return True
 
     def build_universe(self, day: dt.date | None = None, size: int = 50) -> dict:
         """One Massive grouped-daily pull of the whole market: the most traded names (by dollar volume) above $10
