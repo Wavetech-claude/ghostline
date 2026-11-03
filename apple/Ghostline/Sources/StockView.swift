@@ -110,6 +110,16 @@ struct StockPoint: Identifiable {
     var id: Date { day }
 }
 
+extension ChartData {
+    /// The line's points, one per bar that has a place on the x axis and a close (the stock page and the preview).
+    var stockPoints: [StockPoint] {
+        zip(bars, plotDates).compactMap { b, x in
+            guard let x, let c = Double(b.close) else { return nil }
+            return StockPoint(day: x, close: c, text: b.close, real: isIntraday ? b.instant : nil)
+        }
+    }
+}
+
 /// The page: the sections in a scroll view.
 struct StockPage: View {
     let ticker: String
@@ -146,13 +156,7 @@ struct StockSections: View {
 
     static let timeframes = ["1D", "1W", "1M", "3M", "6M", "1Y", "5Y"]
 
-    private var points: [StockPoint] {
-        guard let chart else { return [] }
-        return zip(chart.bars, chart.plotDates).compactMap { b, x in
-            guard let x, let c = Double(b.close) else { return nil }
-            return StockPoint(day: x, close: c, text: b.close, real: chart.isIntraday ? b.instant : nil)
-        }
-    }
+    private var points: [StockPoint] { chart?.stockPoints ?? [] }
 
     /// What the change is measured from. A 1D chart: the previous session's close, as Robinhood does. Another
     /// intraday chart, or a dragged point: the first point. A daily chart: the day before the last.

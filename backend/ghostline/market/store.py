@@ -402,19 +402,22 @@ def search_tickers(db: Database, q: str, limit: int = 20, include_all: bool = Fa
     """Search as you type, Robinhood style. A stock matches when its ticker starts with the text or a word of its name
     does ("n" finds Nvidia, Netflix and Nike; "net" finds Netflix). Order: what the owner holds or watches, then the
     exact ticker, then the most traded (20-day average dollar volume), then the ticker. Warrants, rights and units are
-    left out unless `include_all`; ETFs are in."""
+    left out unless `include_all`; ETFs are in. A brand the company's name lacks ("google" for Alphabet) matches by
+    the prefix of its alias (ticker_aliases)."""
     q = q.strip()
-    like = q.upper().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = escaped.upper() + "%"
     word = r"\m" + re.escape(q)                     # \m: the start of a word, in PostgreSQL's regular expressions
     return db.fetch_all(
         "SELECT t.ticker, t.name, t.kind, (w.ticker IS NOT NULL) AS watched, (p.ticker IS NOT NULL) AS held "
         "FROM tickers t LEFT JOIN watchlist w ON w.ticker = t.ticker "
         "LEFT JOIN (SELECT DISTINCT ticker FROM positions) p ON p.ticker = t.ticker "
-        "WHERE (t.ticker LIKE %s OR t.name ~* %s) "
+        "WHERE (t.ticker LIKE %s OR t.name ~* %s "
+        "OR EXISTS (SELECT 1 FROM ticker_aliases a WHERE a.ticker = t.ticker AND a.alias LIKE %s)) "
         "AND (%s OR t.kind IS NULL OR NOT (t.kind = ANY(%s))) "
         "ORDER BY (w.ticker IS NOT NULL OR p.ticker IS NOT NULL) DESC, (t.ticker = %s) DESC, "
         "t.dollar_volume_20d DESC NULLS LAST, t.ticker LIMIT %s",
-        (like, word, include_all, list(HIDDEN_KINDS), q.upper(), limit))
+        (like, word, escaped.lower() + "%", include_all, list(HIDDEN_KINDS), q.upper(), limit))
 
 
 def save_ticker_reference(db: Database, rows: list[tuple[str, str, str | None, str | None]], source: str,
@@ -496,6 +499,13 @@ def save_market_daily(db: Database, day: dt.date, grouped: dict[str, Bar], sourc
 
 def market_days(db: Database) -> set[dt.date]:
     return {r["day"] for r in db.fetch_all("SELECT DISTINCT day FROM market_daily")}
+
+
+def market_close(db: Database, ticker: str, day: dt.date) -> Decimal | None:
+    """One ticker's close on one day from the whole market's daily file: every listed stock has it, not only the ones
+    the daily pull tracks."""
+    row = db.fetch_one("SELECT close FROM market_daily WHERE ticker = %s AND day = %s", (ticker, day))
+    return row["close"] if row else None
 
 
 def market_day(db: Database, day: dt.date) -> dict[str, DayBar]:

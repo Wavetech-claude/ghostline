@@ -51,7 +51,11 @@ struct WatchlistView: View {
         .sheet(isPresented: $adding) {
             NavigationStack {
                 Form {
-                    TickerField(title: "Ticker or company", ticker: $newTicker)
+                    // a tap previews the stock; its button adds it and closes this sheet
+                    TickerField(title: "Ticker or company", ticker: $newTicker,
+                                action: TickerAction(title: { _ in "Add to Watchlist" },
+                                                     done: { $0.watched ? "Watching" : nil },
+                                                     run: { _ in adding = false; Task { await add() } }))
                 }
                 .navigationTitle("Watch a Ticker")
                 #if os(iOS)

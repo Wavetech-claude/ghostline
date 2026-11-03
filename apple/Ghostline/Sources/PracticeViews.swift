@@ -151,6 +151,7 @@ struct OrderTicketView: View {
     @State private var bracketStop = ""
     @State private var outcome: OrderRow?
     @State private var problem: String?
+    @State private var chosen: TickerChoice?
 
     private var sides: [(String, String)] {
         asset == "stock" ? [("buy", "Buy"), ("sell", "Sell")]
@@ -200,7 +201,8 @@ struct OrderTicketView: View {
                 }
                 Section {
                     if asset == "stock" {
-                        TickerField(title: "Ticker", ticker: $ticker)
+                        TickerField(title: "Ticker", ticker: $ticker, action: .use { chosen = $0 })
+                        ChosenPriceRow(choice: chosen, ticker: ticker)
                     } else {
                         TextField("Option symbol (OCC)", text: $optionSymbol).autocorrectionDisabled()
                     }

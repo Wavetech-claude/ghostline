@@ -14,7 +14,11 @@ struct GhostlineApp: App {
     @State private var lock = AppLock()
 
     init() {
+        #if DEBUG
+        let s = UITestFixture.screen == nil ? SessionModel.fromBundle() : UITestFixture.session()
+        #else
         let s = SessionModel.fromBundle()
+        #endif
         _session = State(initialValue: s)
         _ledger = State(initialValue: LedgerModel(client: s.client))
         _practice = State(initialValue: PracticeModel(client: s.client))
@@ -22,7 +26,7 @@ struct GhostlineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            root
                 .environment(lock)
                 .environment(session)
                 .environment(ledger)
@@ -55,6 +59,15 @@ struct GhostlineApp: App {
                 .environment(practice)
                 .frame(minWidth: 480, minHeight: 360)
         }
+        #endif
+    }
+
+    /// The app; in a Debug build run by the UI tests, the one screen they test (UITestFixture).
+    @ViewBuilder private var root: some View {
+        #if DEBUG
+        if let screen = UITestFixture.screen { UITestHost(screen: screen) } else { RootView() }
+        #else
+        RootView()
         #endif
     }
 }

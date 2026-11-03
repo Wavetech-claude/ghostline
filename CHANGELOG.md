@@ -2,6 +2,23 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.0] — unreleased
+
+- **A tap on a search suggestion opens the stock's preview**, anywhere in the app, as Robinhood does. Before, a tap
+  only filled the box, which read as "nothing happens". The preview shows the ticker and the company, today's price
+  and change, the day's line, and whether you hold or watch it. Its button is the one this screen is for:
+  - Watchlist +: **Add to Watchlist** adds the stock and closes the sheet ("Watching" when it is there already).
+  - Price alert: **Set Alert for NFLX** fills the alert and shows the price now.
+  - Practice order: **Use NFLX** fills the order and shows the price now, for a limit.
+  - Log a trade and a broker statement: **Use NFLX** fills the row.
+  - Search tab: **Open Full Page**, **Watch** and **Practice Buy**.
+- Search finds a brand that the company's name lacks: "google" and "youtube" find Alphabet, "facebook", "instagram"
+  and "whatsapp" find Meta, and also Snapchat, Coke, TSMC, Venmo and BofA (a short list in the database).
+- A stock's 1D chart shows its change for the day even when no daily pull tracks it. Its previous close now comes
+  from the whole market's daily closes; before, only the 96 tracked stocks had one.
+- Each suggestion is its own button for VoiceOver; the list was one element.
+- UI tests on the iPhone simulator tap each of these screens in CI, against fixed answers (no server, no sign-in).
+
 ## [0.31.1] — unreleased
 
 - The check that strikes invented numbers from Claude's memos, chats and briefs is stricter. It could let an invented
