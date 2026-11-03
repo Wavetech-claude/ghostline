@@ -1,7 +1,11 @@
 """Every number in a memo must be a stored value. The facts bundle carries every number Claude was given (and the
 derived ones the code computed); a number in the text that matches none of them, at any rounding, is struck and
 replaced with "[n/a]", and the memo is marked not grounded. Years, small counts and list markers are not numbers
-about money or prices and pass."""
+about money or prices and pass.
+
+Dates and times are neither facts nor claims: a timestamp in the bundle (`as_of` is the current time) gave its minutes
+and seconds as "known numbers", so an invented 250.00 passed whenever the clock showed :02 (2026-11-02). They are
+taken out of the facts before numbers are read, and a date in the text is left as written."""
 
 from __future__ import annotations
 
@@ -12,6 +16,9 @@ from typing import Any
 _NUM = re.compile(
     r"(?<![\w.])[-+]?\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?(?![\w-])"   # 1,234.56
     r"|(?<![\w.])[-+]?\$?\d+(?:\.\d+)?%?(?![\w-])"                  # 1234.56, -3%, $12
+)
+_DATE = re.compile(  # 2026-11-02, 2026-11-02T15:02:50Z, 2026-11-02 15:02:50.123456+00:00
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
 )
 _PASS_LOW, _PASS_HIGH = 0, 12  # counts and ordinals: "3 of 7", "2 analysts"
 _YEAR_LOW, _YEAR_HIGH = 1990, 2100
@@ -28,7 +35,7 @@ def numbers_in(obj: Any, out: set[Decimal] | None = None) -> set[Decimal]:
         except InvalidOperation:
             pass
     elif isinstance(obj, str):
-        for m in _NUM.finditer(obj):
+        for m in _NUM.finditer(_DATE.sub(" ", obj)):
             d = _parse(m.group(0))
             if d is not None:
                 out.add(d)
@@ -50,13 +57,18 @@ def _parse(token: str) -> Decimal | None:
 
 
 def matches(value: Decimal, facts: set[Decimal]) -> bool:
-    """A fact at any rounding (0–4 places), or within 0.5% of one, or its sign flipped, or ×100 / ÷100 (a share
-    shown as a percent)."""
-    cands = {value, -value, value / 100, -value / 100, value * 100, -value * 100}
+    """A fact at any rounding (0–4 places), or within 0.5% of one, or its sign flipped; or the value ×100 / ÷100 (a
+    share shown as a percent), which must equal a fact or be within 0.5% of one. The scaled forms are never rounded:
+    250.00 ÷ 100 = 2.5 rounded to 2 let 250.00 pass on any fact equal to 2 (2026-11-02)."""
+    direct = {value, -value}
+    scaled = {value / 100, -value / 100, value * 100, -value * 100}
     for f in facts:
-        for c in cands:
+        for c in direct | scaled:
             if c == f:
                 return True
+            if f != 0 and abs((c - f) / f) <= Decimal("0.005"):
+                return True
+        for c in direct:
             for places in range(0, 5):
                 q = Decimal(1).scaleb(-places)
                 try:
@@ -64,8 +76,6 @@ def matches(value: Decimal, facts: set[Decimal]) -> bool:
                         return True
                 except InvalidOperation:
                     continue
-            if f != 0 and abs((c - f) / f) <= Decimal("0.005"):
-                return True
     return False
 
 
@@ -87,4 +97,11 @@ def ground(text: str, facts: Any) -> tuple[str, list[str]]:
         struck.append(token)
         return "[n/a]"
 
-    return _NUM.sub(repl, text), struck
+    parts: list[str] = []
+    last = 0
+    for m in _DATE.finditer(text):  # a date is left as written, never read as a number
+        parts.append(_NUM.sub(repl, text[last:m.start()]))
+        parts.append(m.group(0))
+        last = m.end()
+    parts.append(_NUM.sub(repl, text[last:]))
+    return "".join(parts), struck

@@ -2,6 +2,14 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.31.1] — unreleased
+
+- The check that strikes invented numbers from Claude's memos, chats and briefs is stricter. It could let an invented
+  price through by chance: the current time in the facts gave its minutes as "known numbers", and a number divided by
+  100 was rounded before matching, so 250.00 passed whenever the clock showed :02, or whenever any fact equalled 2.
+  Dates and times are no longer read as numbers, and a number shown as a share must really match one. This also
+  ends a test that failed now and then.
+
 ## [0.31.0] — unreleased
 
 - **Recurring buys** in the practice account: "buy $50 of VOO every Monday", every trading day, every week, every
