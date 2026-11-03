@@ -144,6 +144,7 @@ jobs:
         run: swift test --package-path GhostlineKit
 
       - name: Build and test, iOS
+        id: ios
         if: steps.scope.outputs.docs_only != 'true'
         working-directory: apple
         run: |
@@ -155,8 +156,21 @@ jobs:
           print(names[0] if names else "")')"
           [ -n "$dest" ] || { echo "::error::no available iPhone simulator"; xcrun simctl list devices available; exit 1; }
           echo "destination: $dest"
+          echo "dest=$dest" >> "$GITHUB_OUTPUT"
           xcodebuild -project Ghostline.xcodeproj -scheme Ghostline -configuration Debug \
             -destination "platform=iOS Simulator,name=$dest" CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/dd-ios" test
+
+      # The real screens tapped on the simulator against fixed answers (Ghostline/Sources/UITestFixture.swift): a tap
+      # on a search suggestion opens the stock's preview with the action of the screen it came from.
+      - name: UI tests, iOS
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: apple
+        env:
+          DEST: ${{ steps.ios.outputs.dest }}
+        run: |
+          xcodebuild -project Ghostline.xcodeproj -scheme GhostlineUITests -configuration Debug \
+            -destination "platform=iOS Simulator,name=$DEST" CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath "$RUNNER_TEMP/dd-ios" test
 
       - name: Build and test, macOS

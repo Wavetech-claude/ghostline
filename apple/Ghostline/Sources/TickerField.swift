@@ -33,17 +33,41 @@ final class TickerSearch {
     }
 }
 
+/// What a tap on a suggestion offers on this screen, Robinhood's way (the owner, 2026-11-02): a preview of the stock
+/// with the one action this screen is for. Every ticker field names its action, so a tap never only fills the box.
+struct TickerAction {
+    var title: (TickerMatch) -> String
+    /// The title when the action is already done (the stock is on the watchlist): the button shows it and is off.
+    var done: (TickerMatch) -> String? = { _ in nil }
+    /// Runs after the preview has closed and the field holds the ticker.
+    var run: (TickerChoice) -> Void = { _ in }
+
+    /// "Use NFLX": fills the field, then `run`.
+    static func use(_ run: @escaping (TickerChoice) -> Void = { _ in }) -> TickerAction {
+        TickerAction(title: { "Use \($0.ticker)" }, run: run)
+    }
+}
+
+/// The stock chosen in a preview, with the price the preview showed (nil when none is stored yet).
+struct TickerChoice: Equatable {
+    let match: TickerMatch
+    let price: String?
+}
+
 /// A ticker field with suggestions: typing "n" lists Nvidia, Netflix, Nike...; typing part of a name finds the stock.
-/// A tap fills the field with the ticker. Typing a ticker the list lacks still works: the field keeps what was typed.
+/// A tap opens the stock's preview with this screen's action; the action fills the field. Typing a ticker the list
+/// lacks still works: the field keeps what was typed.
 struct TickerField: View {
     @Environment(SessionModel.self) private var session
     let title: String
     @Binding var ticker: String
     var limit = 6
-    var onPick: (TickerMatch) -> Void = { _ in }
+    let action: TickerAction
 
     @State private var search = TickerSearch()
     @State private var picked: String?
+    @State private var previewing: TickerMatch?
+    @State private var chosen: TickerChoice?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -57,7 +81,7 @@ struct TickerField: View {
             if focused, ticker != picked, !search.results.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(search.results.prefix(limit)) { match in
-                        Button { pick(match) } label: { TickerMatchRow(match: match, compact: true) }
+                        Button { preview(match) } label: { TickerMatchRow(match: match, compact: true) }
                             .buttonStyle(.plain)
                             .padding(.vertical, 6)
                         if match.id != search.results.prefix(limit).last?.id { Divider() }
@@ -65,21 +89,45 @@ struct TickerField: View {
                 }
                 .padding(.horizontal, 10)
                 .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 10))
+                // a container: each suggestion stays its own button (a label alone merged the list into one element)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel("Suggestions")
+                .accessibilityIdentifier("suggestions")
             }
         }
         .task(id: ticker) {
             guard ticker != picked else { return }
             await search.run(ticker, client: session.client, limit: limit)
         }
+        .sheet(item: $previewing, onDismiss: finish) { match in
+            TickerPreview(match: match) { choice, _ in
+                let done = action.done(match)
+                Button {
+                    chosen = choice
+                    previewing = nil
+                } label: {
+                    Text(done ?? action.title(match)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(done != nil)
+            }
+        }
     }
 
-    private func pick(_ match: TickerMatch) {
-        picked = match.ticker
-        ticker = match.ticker
-        search.clear()
+    private func preview(_ match: TickerMatch) {
         focused = false
-        onPick(match)
+        previewing = match
+    }
+
+    /// After the preview has closed: fill the field, then the screen's action. It runs only once the preview is gone,
+    /// so an action that closes the screen's own sheet never races the preview's.
+    private func finish() {
+        guard let choice = chosen else { return }
+        chosen = nil
+        picked = choice.match.ticker
+        ticker = choice.match.ticker
+        search.clear()
+        action.run(choice)
     }
 }
 

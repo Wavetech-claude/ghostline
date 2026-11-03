@@ -77,6 +77,7 @@ struct AddAlertSheet: View {
     @State private var kind = "above"
     @State private var value = ""
     @State private var problem: String?
+    @State private var chosen: TickerChoice?
 
     private var valueLabel: String {
         switch kind {
@@ -90,7 +91,9 @@ struct AddAlertSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TickerField(title: "Ticker", ticker: $ticker)
+                TickerField(title: "Ticker", ticker: $ticker,
+                            action: TickerAction(title: { "Set Alert for \($0.ticker)" }, run: { chosen = $0 }))
+                ChosenPriceRow(choice: chosen, ticker: ticker)
                 Picker("When", selection: $kind) {
                     Text("Price Goes Above").tag("above")
                     Text("Price Goes Below").tag("below")

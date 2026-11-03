@@ -95,13 +95,16 @@ def _intraday(request: Request, ticker: str, timeframe: str) -> dict:
         stored = [b for b in store.bars(db, ticker, interval, since=start) if _in_session(cal, days, b["ts"])]
     daily = store.bars(db, ticker, "1D")
     before = [b for b in daily if b["ts"].date() < days[-1]]
+    # The 1D baseline. Daily bars are stored only for the stocks the daily pull tracks (96 of ~10,400 on 2026-11-02),
+    # so a stock found by search takes the previous session's close from the whole market's daily file instead.
+    previous = before[-1]["close"] if before else store.market_close(db, ticker, cal.previous_session(days[-1]))
     ind = indicators.chart_payload(stored)
     levels = indicators.chart_payload(daily)["levels"] if daily else []
     return {"ticker": ticker, "timeframe": timeframe, "interval": interval, "feed": "iex", "delayed": False,
             "bars": store.as_json(stored),
             "source": stored[-1]["source"] if stored else None,
             "as_of": max(b["as_of"] for b in stored).isoformat() if stored else None,
-            "previous_close": str(before[-1]["close"]) if before else None,
+            "previous_close": str(previous) if previous is not None else None,
             "market_open": market_open, "sessions": [d.isoformat() for d in days],
             "sma20": ind["sma20"], "sma50": ind["sma50"], "sma200": ind["sma200"], "rsi14": ind["rsi14"],
             "macd": ind["macd"], "bollinger": ind["bollinger"], "levels": levels}

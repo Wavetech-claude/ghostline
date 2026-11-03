@@ -13,7 +13,15 @@ xcodebuild -project Ghostline.xcodeproj -scheme Ghostline \
   -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO test
 xcodebuild -project Ghostline.xcodeproj -scheme Ghostline \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+# UI tests, iPhone only: the real screens tapped against fixed answers, no server and no sign-in
+xcodebuild -project Ghostline.xcodeproj -scheme GhostlineUITests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO test
 ```
+
+The UI tests launch the app with `-uiTestScreen <name>` (watchlist, search, alert, order, trade, statement). In a Debug
+build that opens one screen with the backend replaced by fixed answers (`Ghostline/Sources/UITestFixture.swift`); a
+Release build does not contain that code. A new screen with a ticker field gets a case there and a test in
+`GhostlineUITests/`.
 
 Debug builds point at staging and Release builds at production (`Config/*.xcconfig` → Info.plist
 `GHOSTLINE_API_BASE_URL`). Never hard-code an address.

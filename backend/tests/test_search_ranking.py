@@ -7,6 +7,8 @@ import datetime as dt
 from decimal import Decimal
 
 import httpx
+import psycopg
+import pytest
 
 from ghostline.db import Database
 from ghostline.market import Bar, store
@@ -63,6 +65,28 @@ def test_what_the_owner_holds_or_watches_comes_first(client):
     got = client.get("/market/search", params={"q": "n"}, headers=_h(client)).json()["results"]
     assert got[0]["ticker"] == "NAAA" and got[0]["watched"] is True and got[1]["ticker"] == "N"
     assert got[0]["kind"] == "CS" and got[0]["held"] is False
+
+
+def test_a_brand_name_finds_the_company_that_owns_it(client):
+    """The owner typed "google" and got nothing: the company is Alphabet Inc. (2026-11-02)."""
+    db = client.app.state.db
+    store.save_ticker_reference(db, [("GOOGL", "Alphabet Inc.", "CS", None), ("GOOG", "Alphabet Inc.", "CS", None),
+                                     ("META", "Meta Platforms, Inc.", "CS", None)], "massive", NOW)
+    db.execute("UPDATE tickers SET dollar_volume_20d = CASE ticker WHEN 'GOOGL' THEN 9 WHEN 'GOOG' THEN 8 ELSE 1 END")
+    assert _search(client, "google") == ["GOOGL", "GOOG"]
+    assert _search(client, "Google") == ["GOOGL", "GOOG"]          # any case
+    assert _search(client, "goog") == ["GOOG", "GOOGL"]             # a ticker prefix still ranks the exact ticker first
+    assert _search(client, "face") == ["META"] and _search(client, "whatsapp") == ["META"]
+    assert _search(client, "coke") == []                            # an alias of a ticker the directory lacks
+    assert _search(client, "go%") == [] and _search(client, "g_ogle") == []   # wildcards stay literal
+
+
+def test_every_alias_is_lower_case_and_names_an_upper_case_ticker(client):
+    db = client.app.state.db
+    rows = db.fetch_all("SELECT alias, ticker FROM ticker_aliases")
+    assert {("google", "GOOGL"), ("facebook", "META")} <= {(r["alias"], r["ticker"]) for r in rows}
+    with pytest.raises(psycopg.errors.CheckViolation):
+        db.execute("INSERT INTO ticker_aliases (alias, ticker) VALUES ('Google', 'GOOGL')")
 
 
 def test_odd_characters_in_the_text_are_literal(client):

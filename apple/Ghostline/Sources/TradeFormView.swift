@@ -56,7 +56,7 @@ struct TradeFormView: View {
                     }
                 }
                 Section {
-                    TickerField(title: "Ticker", ticker: $ticker)
+                    TickerField(title: "Ticker", ticker: $ticker, action: .use())
                     if asset == "option" {
                         TextField("Option symbol (OCC)", text: $optionSymbol).autocorrectionDisabled()
                     }

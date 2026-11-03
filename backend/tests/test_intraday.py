@@ -9,7 +9,7 @@ import pytest
 
 from ghostline.main import create_app
 from ghostline.market import Bar, store
-from ghostline.market.calendar import NEW_YORK, WEEKDAYS
+from ghostline.market.calendar import NEW_YORK, WEEKDAYS, Calendar
 from ghostline.market.jobs import Jobs
 from ghostline.market.sources import Alpaca
 from ghostline.routes import market as market_routes
@@ -122,6 +122,28 @@ def test_staging_never_fetches_an_intraday_chart(client, monkeypatch, keys):
     store.save_bars(client.app.state.db, "ZZZZ", "5Min", _five_min(day), "alpaca", _at(day, 14))
     body = client.get("/charts", params={"ticker": "ZZZZ", "timeframe": "1D"}, headers=_h(client)).json()
     assert calls == [] and len(body["bars"]) == 78                                       # production's copy, as stored
+
+
+def test_a_searched_stock_takes_its_previous_close_from_the_whole_market_file(client, monkeypatch):
+    """A stock nobody tracks has no daily bars (96 of ~10,400 had them in production, 2026-11-02), so its 1D chart had
+    no baseline and the preview showed no change for the day. The whole market's daily file has every stock's close."""
+    day = _last_weekday()
+    db = client.app.state.db
+    monkeypatch.setattr(market_routes, "_now", lambda: _at(day, 15))
+    store.save_bars(db, "ZZZZ", "5Min", _five_min(day), "alpaca", _at(day, 14))
+    prev = Calendar.load(db).previous_session(day)
+    one = lambda close: Bar(_at(prev, 16), *([Decimal(close)] * 4), Decimal(1))  # noqa: E731
+    body = client.get("/charts", params={"ticker": "ZZZZ", "timeframe": "1D"}, headers=_h(client)).json()
+    assert body["previous_close"] is None                                   # no close stored anywhere: none, not a guess
+    store.save_market_daily(db, prev - dt.timedelta(days=7), {"ZZZZ": one("50")}, "massive", _at(day, 1))
+    body = client.get("/charts", params={"ticker": "ZZZZ", "timeframe": "1D"}, headers=_h(client)).json()
+    assert body["previous_close"] is None                                   # an older session is not the previous one
+    store.save_market_daily(db, prev, {"ZZZZ": one("61.5")}, "massive", _at(day, 1))
+    body = client.get("/charts", params={"ticker": "ZZZZ", "timeframe": "1D"}, headers=_h(client)).json()
+    assert body["previous_close"] == "61.5000" and len(body["bars"]) == 78
+    store.save_bars(db, "ZZZZ", "1D", [one("60")], "alpaca", _at(day, 1))
+    body = client.get("/charts", params={"ticker": "ZZZZ", "timeframe": "1D"}, headers=_h(client)).json()
+    assert body["previous_close"] == "60.0000"                              # the stock's own daily bar comes first
 
 
 def test_old_intraday_bars_are_pruned_and_daily_bars_kept(fresh_db, monkeypatch, keys):

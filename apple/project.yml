@@ -82,6 +82,19 @@ targets:
         # XcodeGen writes the iOS test-host path for both destinations; the Mac bundle keeps its binary in Contents/MacOS.
         "TEST_HOST[sdk=macosx*]": $(BUILT_PRODUCTS_DIR)/Ghostline.app/Contents/MacOS/Ghostline
         "BUNDLE_LOADER[sdk=macosx*]": $(BUILT_PRODUCTS_DIR)/Ghostline.app/Contents/MacOS/Ghostline
+  # UI tests tap the real screens against fixed answers (Ghostline/Sources/UITestFixture.swift, Debug builds only).
+  # iPhone only, in their own scheme: CI runs them on the simulator after the unit tests.
+  GhostlineUITests:
+    type: bundle.ui-testing
+    supportedDestinations: [iOS]
+    sources:
+      - path: GhostlineUITests
+    dependencies:
+      - target: Ghostline
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wavetech.ghostline.uitests
+        TEST_TARGET_NAME: Ghostline
 schemes:
   Ghostline:
     build:
@@ -96,3 +109,12 @@ schemes:
         - GhostlineTests
     archive:
       config: Release
+  GhostlineUITests:
+    build:
+      targets:
+        Ghostline: all
+        GhostlineUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - GhostlineUITests
