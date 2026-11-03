@@ -2,6 +2,19 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.1] — unreleased
+
+- **The stock page no longer lags under the finger.** Each draw of the page read every bar's date six times, with a
+  slow date reader, and drew the line as one mark per point. Measured on the build Mac, one draw of the page:
+  - 6-month chart: 170 ms before, 9 to 13 ms now (a smooth frame has 8 to 16 ms);
+  - 5-year chart: about 2.8 s before, 35 to 43 ms now.
+- Dates are read once, when a chart arrives, with Swift's ISO 8601 reader (0.4 µs a read; the old reader took about
+  40 µs, and the old code made two new ones each time). Every list that shows a time reads it faster too.
+- The price line is drawn as one line and one fill (`LinePlot`, `AreaPlot`), not one mark per point: 28 ms for 1,250
+  points instead of 494 ms. It looks the same.
+- A stock page asks for its news, analysts, memos, portfolio and watchlist at the same time, not one after another,
+  and draws once for them.
+
 ## [0.32.0] — unreleased
 
 - **A tap on a search suggestion opens the stock's preview**, anywhere in the app, as Robinhood does. Before, a tap

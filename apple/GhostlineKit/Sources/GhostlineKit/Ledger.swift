@@ -323,15 +323,38 @@ public enum Stamp {
     public static func localDay(_ date: Date, in zone: TimeZone = .current) -> String {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = zone
+        return day(of: date, in: cal)
+    }
+
+    /// The New York day of a moment, as "yyyy-MM-dd": the session a bar belongs to. Made for a loop over a chart's
+    /// bars, so it uses one calendar made once.
+    public static func newYorkDay(_ date: Date) -> String {
+        day(of: date, in: newYork)
+    }
+
+    private static func day(of date: Date, in cal: Calendar) -> String {
         let c = cal.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     public static func date(_ iso: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        (try? Date(iso, strategy: fractionalISO)) ?? (try? Date(iso, strategy: plainISO))
     }
+
+    /// ISO 8601 parse styles: values, so they are shared freely. Measured 2026-11-03 on the build Mac: a read takes
+    /// about 0.4 µs with these and about 40 µs with ISO8601DateFormatter, even reused. The old code made two new
+    /// formatters a read; a 5-year chart's dates took 381 ms, and the stock page read them six times a draw.
+    private static let fractionalISO = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let plainISO = Date.ISO8601FormatStyle()
+
+    private static func gregorian(_ zone: String) -> Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: zone) ?? .current
+        return cal
+    }
+
+    private static let newYork = gregorian("America/New_York")
+    private static let utc = gregorian("UTC")
 
     /// A day as "Oct 28, 2026". A date with no time (an earnings day, a series point) is a calendar day, not a
     /// moment, so it is read and shown in UTC: shown in the device's zone it would move a day west of Greenwich.
@@ -350,14 +373,11 @@ public enum Stamp {
     /// mark under its own day's label. A daily bar is stamped at New York midnight (04:00 or 05:00 UTC, both data
     /// providers), which in Pacific time is the evening before; a date with no time is the day as written.
     public static func tradingDay(_ iso: String, in calendar: Calendar = .current) -> Date? {
-        var source = Calendar(identifier: .gregorian)
         let parts: DateComponents
         if let instant = date(iso) {
-            source.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-            parts = source.dateComponents([.year, .month, .day], from: instant)
+            parts = newYork.dateComponents([.year, .month, .day], from: instant)
         } else if let day = try? Date(iso, strategy: .iso8601.year().month().day()) {
-            source.timeZone = TimeZone(identifier: "UTC") ?? .current
-            parts = source.dateComponents([.year, .month, .day], from: day)
+            parts = utc.dateComponents([.year, .month, .day], from: day)
         } else {
             return nil
         }

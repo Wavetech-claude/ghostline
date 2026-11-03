@@ -61,23 +61,83 @@ public struct ChartData: Codable, Sendable, Equatable {
     public let previousClose: String?      // intraday: the close before the latest session (the 1D baseline)
     public let marketOpen: Bool?
 
-    public var isIntraday: Bool { interval.map { $0.hasSuffix("Min") || $0.hasSuffix("Hour") } ?? false }
-
+    /// Each bar's moment (`BarRow.instant`), read once when the chart arrives.
+    public let instants: [Date?]
     /// Where each bar sits on the x axis. Daily bars: their day. Intraday bars: their moment, with the closed hours
     /// between sessions taken out, so a week of 30-minute bars draws as one line instead of five islands separated by
     /// nights and a weekend. The axis is hidden or labelled from the bars' own times wherever these are used.
-    public var plotDates: [Date?] {
-        guard isIntraday else { return bars.map(\.date) }
+    /// Worked out once when the chart arrives: the stock page reads it on every frame of a drag.
+    public let plotDates: [Date?]
+
+    public var isIntraday: Bool { Self.isIntraday(interval) }
+
+    private static func isIntraday(_ interval: String?) -> Bool {
+        interval.map { $0.hasSuffix("Min") || $0.hasSuffix("Hour") } ?? false
+    }
+
+    static func plotDates(bars: [BarRow], instants: [Date?], interval: String?) -> [Date?] {
+        guard isIntraday(interval) else { return bars.map(\.date) }
         var out: [Date?] = []
         var last: (real: Date, plot: Date)?
-        let step = Self.seconds(of: interval ?? "") ?? 300
-        for bar in bars {
-            guard let real = bar.instant else { out.append(nil); continue }
+        let step = seconds(of: interval ?? "") ?? 300
+        for real in instants {
+            guard let real else { out.append(nil); continue }
             let plot = last.map { $0.plot.addingTimeInterval(min(real.timeIntervalSince($0.real), step)) } ?? real
             out.append(plot)
             last = (real, plot)
         }
         return out
+    }
+
+    /// The backend's fields; the derived ones above are not part of the JSON.
+    private struct Wire: Codable {
+        let ticker: String
+        let timeframe: String
+        let bars: [BarRow]
+        let source: String?
+        let asOf: String?
+        let sma20: [Double?]
+        let sma50: [Double?]
+        let sma200: [Double?]
+        let rsi14: [Double?]
+        let macd: MACDLines
+        let bollinger: BollingerLines
+        let levels: [Level]
+        let interval: String?
+        let feed: String?
+        let delayed: Bool?
+        let previousClose: String?
+        let marketOpen: Bool?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let w = try Wire(from: decoder)
+        ticker = w.ticker
+        timeframe = w.timeframe
+        bars = w.bars
+        source = w.source
+        asOf = w.asOf
+        sma20 = w.sma20
+        sma50 = w.sma50
+        sma200 = w.sma200
+        rsi14 = w.rsi14
+        macd = w.macd
+        bollinger = w.bollinger
+        levels = w.levels
+        interval = w.interval
+        feed = w.feed
+        delayed = w.delayed
+        previousClose = w.previousClose
+        marketOpen = w.marketOpen
+        instants = w.bars.map(\.instant)
+        plotDates = Self.plotDates(bars: w.bars, instants: instants, interval: w.interval)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try Wire(ticker: ticker, timeframe: timeframe, bars: bars, source: source, asOf: asOf, sma20: sma20,
+                 sma50: sma50, sma200: sma200, rsi14: rsi14, macd: macd, bollinger: bollinger, levels: levels,
+                 interval: interval, feed: feed, delayed: delayed, previousClose: previousClose,
+                 marketOpen: marketOpen).encode(to: encoder)
     }
 
     /// The bar whose plotted x is nearest `x` (a finger dragging across the chart).
