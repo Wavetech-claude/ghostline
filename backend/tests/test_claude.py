@@ -78,6 +78,24 @@ def test_grounding_strikes_numbers_that_are_not_in_the_facts():
     assert struck == []
 
 
+def test_the_clock_in_the_facts_never_grounds_an_invented_number():
+    # as_of is the current time: at 15:02 its minutes read as the number 2, and 250.00 ÷ 100 = 2.5 rounded to 2 let
+    # an invented price pass (the flaky deep-dive test, 2026-11-02).
+    for stamp in ("2026-11-02T15:02:50+00:00", "2026-11-02 15:02:02.250000+00:00", "2026-11-02T02:02:02Z"):
+        assert grounding.ground("Worth 250.00 by June.", {"price": "100.00", "as_of": stamp})[1] == ["250.00"]
+    # a date or time in the text is left as written
+    out, struck = grounding.ground("Next report 2026-11-05 at 2026-11-05T21:30:00Z, price 100.00.", {"price": "100.00"})
+    assert struck == [] and "2026-11-05T21:30:00Z" in out
+
+
+def test_a_number_shown_as_a_share_must_really_match():
+    assert grounding.ground("Worth 250.00 by June.", {"days": 2})[1] == ["250.00"]
+    assert grounding.ground("A 350.00 target.", {"count": 4})[1] == ["350.00"]
+    # the real cases still pass: a share as a percent, rounded; a price rounded from more places
+    assert grounding.ground("Margin 3.12%, price 100.00.", {"margin": 0.031234, "price": 100.004})[1] == []
+    assert grounding.ground("Up 25% on the year.", {"ytd": 0.25})[1] == []
+
+
 # ── the jobs, with a fake Claude ────────────────────────────────────────────────────────────────────────────
 def _facts_ready(client, h, ticker="AAPL"):
     deposit(client, h, 10000)
