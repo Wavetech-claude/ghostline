@@ -21,7 +21,9 @@ xcodebuild -project Ghostline.xcodeproj -scheme GhostlineUITests \
 The UI tests launch the app with `-uiTestScreen <name>` (watchlist, search, alert, order, trade, statement). In a Debug
 build that opens one screen with the backend replaced by fixed answers (`Ghostline/Sources/UITestFixture.swift`); a
 Release build does not contain that code. A new screen with a ticker field gets a case there and a test in
-`GhostlineUITests/`.
+`GhostlineUITests/`. The name `app` opens the whole app against those answers, with its lock. `-appLockGrace <seconds>`
+shortens the lock's minute away. `AppLockUITests` turns Face ID on in the simulator and gives it a match by itself, with
+the system notifications the simulator listens to, so it needs nothing from the workflow.
 
 Debug builds point at staging and Release builds at production (`Config/*.xcconfig` → Info.plist
 `GHOSTLINE_API_BASE_URL`). Never hard-code an address.

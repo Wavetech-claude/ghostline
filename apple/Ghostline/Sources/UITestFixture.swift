@@ -7,11 +7,15 @@ import SwiftUI
 /// UI tests only, in Debug builds: `-uiTestScreen <name>` opens one real screen with the backend replaced by fixed
 /// answers, so the tests tap the real views with no server and no sign-in. A Release build has none of this code.
 enum UITestFixture {
-    static let screen: String? = {
+    static let screen = argument("-uiTestScreen")
+    /// `-appLockGrace <seconds>`: the app lock's time away, so a UI test need not wait a whole minute.
+    static let lockGrace = argument("-appLockGrace").flatMap(TimeInterval.init)
+
+    private static func argument(_ name: String) -> String? {
         let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-uiTestScreen"), args.indices.contains(i + 1) else { return nil }
+        guard let i = args.firstIndex(of: name), args.indices.contains(i + 1) else { return nil }
         return args[i + 1]
-    }()
+    }
 
     @MainActor static func session() -> SessionModel {
         let base = URL(string: "https://fixture.invalid")!
@@ -94,6 +98,8 @@ final class FixtureProtocol: URLProtocol, @unchecked Sendable {
         switch (method, path) {
         case ("GET", "/version"):
             return (200, #"{"version": "0.0.0", "commit": "fixture", "env": "fixture"}"#)
+        case ("GET", "/account"):
+            return (200, #"{"sub": "fixture", "email_masked": "q…@example.com", "created_at": "2026-10-30T00:00:00+00:00", "last_sign_in_at": null}"#)
         case ("GET", "/market/search"):
             let q = (query.first { $0.name == "q" }?.value ?? "").lowercased()
             let rows = stocks.filter { t, name, _ in
