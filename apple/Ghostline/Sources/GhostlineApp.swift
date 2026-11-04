@@ -62,10 +62,11 @@ struct GhostlineApp: App {
         #endif
     }
 
-    /// The app; in a Debug build run by the UI tests, the one screen they test (UITestFixture).
+    /// The app; in a Debug build run by the UI tests, the one screen they test (UITestFixture). The screen "app" is
+    /// the whole app (sign-in check, app lock, tabs) against the fixed answers.
     @ViewBuilder private var root: some View {
         #if DEBUG
-        if let screen = UITestFixture.screen { UITestHost(screen: screen) } else { RootView() }
+        if let screen = UITestFixture.screen, screen != "app" { UITestHost(screen: screen) } else { RootView() }
         #else
         RootView()
         #endif

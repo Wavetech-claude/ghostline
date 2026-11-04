@@ -2,6 +2,22 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.2] — unreleased
+
+- **The app lock asks for Face ID again when you come back.** The lock screen also covers the app while it leaves, for
+  the app switcher, and it asked for Face ID at that moment. That request failed. When you came back the app was
+  locked, it showed "Not unlocked. Try again." and it did not ask. Reproduced on the iPhone simulator: 16 seconds locked
+  with a matching face in view, until a tap.
+- The lock asks only while the app is on screen, and by itself once each time it locks. After a cancel, only the button
+  asks, so the prompt does not come back again and again.
+- A new request replaces one still waiting, so one is alive at a time and the button cannot go dead.
+- The lock says why it did not open: cancelled, face not recognized, or too many tries (use the passcode). When the
+  system takes the prompt away because you left, it says nothing and asks again when you return.
+- UI tests now run the whole app with its lock on the iPhone simulator, and the tests give Face ID its match themselves.
+  On the old lock, the test of asking at launch and on return fails, and so does the test of leaving during the prompt.
+  The cancel test fails when a cancel brings the prompt back. The short absence passes on both locks: it guards against
+  a new prompt.
+
 ## [0.32.1] — unreleased
 
 - **The stock page no longer lags under the finger.** Each draw of the page read every bar's date six times, with a
