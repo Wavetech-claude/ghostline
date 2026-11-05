@@ -38,7 +38,9 @@ final class AppLockUITests: XCTestCase {
             sleep(1)
             if !unlockButton(app).exists { return }
         }
-        XCTFail("still locked \(moment), with a matching face in view for 20 s: nothing asked", line: line)
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        let why = alert.exists ? "a system alert is in the way: \(alert.label)" : "nothing asked"
+        XCTFail("still locked \(moment), with a matching face in view for 20 s: \(why)", line: line)
     }
 
     func testTheLockAsksByItselfAtLaunchAndAfterAnAbsence() {
