@@ -38,7 +38,9 @@ final class AppLockUITests: XCTestCase {
             sleep(1)
             if !unlockButton(app).exists { return }
         }
-        XCTFail("still locked \(moment), with a matching face in view for 20 s: nothing asked", line: line)
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        let why = alert.exists ? "a system alert is in the way: \(alert.label)" : "nothing asked"
+        XCTFail("still locked \(moment), with a matching face in view for 20 s: \(why)", line: line)
     }
 
     func testTheLockAsksByItselfAtLaunchAndAfterAnAbsence() {
@@ -71,11 +73,15 @@ final class AppLockUITests: XCTestCase {
 
     func testACancelStaysCancelledUntilTheButtonIsTapped() {
         let app = launch()
-        sleep(2)
-        notify_post("com.apple.BiometricKit_Sim.pearl.nomatch")
         let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let cancel = system.buttons["com.apple.localauthentication.ax.authentication.button.cancel"].firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 10), "the system offers Cancel after a face it does not know")
+        // A face counts only while the prompt is up, and a first launch on a slow machine brings it up late, so one
+        // face after a fixed wait can be lost. The first face that counts brings Cancel, which ends the loop.
+        for _ in 0..<7 where !cancel.exists {
+            notify_post("com.apple.BiometricKit_Sim.pearl.nomatch")
+            _ = cancel.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(cancel.exists, "the system offers Cancel after a face it does not know")
         cancel.tap()
         XCTAssertTrue(app.staticTexts["Cancelled. Tap Unlock to try again."].waitForExistence(timeout: 5))
         notify_post("com.apple.BiometricKit_Sim.pearl.match")

@@ -45,6 +45,11 @@ final class PushDelegate: NSObject, NSApplicationDelegate {
 extension PushDelegate {
     @MainActor
     static func requestPermission(then register: @MainActor @escaping () -> Void) async {
+        #if DEBUG
+        // A UI test runs on fixed answers and needs no push. The system's alert covers the app at a moment of its own
+        // choosing, and the app lock rightly waits behind it, so the lock's tests passed or failed by that timing.
+        guard UITestFixture.screen == nil else { return }
+        #endif
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         if granted { register() }
