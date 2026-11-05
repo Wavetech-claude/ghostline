@@ -2,6 +2,17 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.3] — unreleased
+
+- **Tradier's real answers.** The first calls with the production token (2026-11-04) showed two defects. Production
+  had not used this code yet, because it had no Tradier key.
+- An option with no trade comes with a time of 0, and the app stamped its quote 1 January 1970 (48 of 122 rows in one
+  AAPL chain). A quote now carries its newest time: its bid, its ask or its last trade.
+- A bid or ask of 0 means there is none. The app read it as a price, so a practice order could have filled at $0. The
+  order now stays open, as it does on Alpaca's answers.
+- A test now fixes what the Tradier client can do: read quotes, expiry dates and option chains, and nothing else. The
+  token has full access to the account, orders included, so any change to this needs a deliberate edit of that test.
+
 ## [0.32.2] — unreleased
 
 - **The app lock asks for Face ID again when you come back.** The lock screen also covers the app while it leaves, for

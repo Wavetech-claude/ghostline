@@ -113,7 +113,7 @@ def _date(s: Any) -> dt.date | None:
 
 
 def _stamp(s: Any) -> dt.datetime | None:
-    if s is None:
+    if not s:                   # Tradier sends a time of 0 for "never" (an option with no trade), never 1 January 1970
         return None
     if isinstance(s, int | float):
         return dt.datetime.fromtimestamp(float(s) / (1000 if float(s) > 1e11 else 1), tz=dt.UTC)
@@ -545,9 +545,12 @@ class Tradier(Source):
             raw = [raw]
         out = []
         for q in raw:
-            ts = _stamp(q.get("trade_date")) or dt.datetime.now(dt.UTC)
-            out.append(Quote(q.get("symbol"), dec(q.get("bid")), dec(q.get("ask")), dec(q.get("last")), ts,
-                             delayed=True))
+            # The bid and ask move after the last trade: the quote is as old as the newest of the three times.
+            stamps = [_stamp(q.get(k)) for k in ("bid_date", "ask_date", "trade_date")]
+            ts = max((s for s in stamps if s), default=None) or dt.datetime.now(dt.UTC)
+            # A bid or ask of 0 means none, as in Alpaca's answers: it is not a price an order can fill at.
+            out.append(Quote(q.get("symbol"), dec(q.get("bid") or None), dec(q.get("ask") or None), dec(q.get("last")),
+                             ts, delayed=True))
         return out
 
     def expirations(self, ticker: str) -> list[dt.date]:
@@ -559,7 +562,8 @@ class Tradier(Source):
         j = self.get("/markets/options/chains", params={"symbol": ticker, "expiration": expiration.isoformat(),
                                                         "greeks": "true"}, headers=self._headers())
         raw = ((j.get("options") or {}).get("option")) or []
-        return raw if isinstance(raw, list) else [raw]
+        rows = raw if isinstance(raw, list) else [raw]
+        return [{**o, "bid": o.get("bid") or None, "ask": o.get("ask") or None} for o in rows]
 
 
 class GDELT(Source):
