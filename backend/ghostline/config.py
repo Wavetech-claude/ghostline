@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     worker_token: str = Field(default="", alias="GHOSTLINE_WORKER_TOKEN")
     test_signer_key: str = Field(default="", alias="GHOSTLINE_TEST_SIGNER_KEY")
     api_internal_url: str = Field(default="", alias="GHOSTLINE_API_INTERNAL_URL")
-    # Proof run E6b of the delivery pipeline (0.32.4 only, removed in 0.32.5): in production /health turns unhealthy this
-    # many seconds after start. Coolify switches to the release while it is healthy; then the rollback watch must act.
+    # Proof run E6b of the delivery pipeline (0.32.4 only, removed in 0.32.5): in production /health turns unhealthy
+    # this many seconds after start. Coolify switches to the release while it is healthy; then the rollback watch acts.
     e6b_after_s: int = Field(default=180, alias="GHOSTLINE_E6B_AFTER_S")
 
     minio_endpoint: str = Field(default="", alias="MINIO_ENDPOINT")
