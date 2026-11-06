@@ -2,6 +2,10 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.5] — unreleased
+
+- Proof run E6b is over: `/health` no longer turns unhealthy in production three minutes after start. Nothing else changes.
+
 ## [0.32.4] — unreleased
 
 - Proof run E6b of the delivery pipeline, run again on the owner's word (2026-11-05): a release that starts healthy and
