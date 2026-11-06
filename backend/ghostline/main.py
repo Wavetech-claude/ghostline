@@ -4,7 +4,6 @@ names the running version and commit; /version names them without touching the d
 from __future__ import annotations
 
 import logging
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -38,7 +37,6 @@ logger = logging.getLogger("ghostline")
 
 def create_app(settings: Settings | None = None, *, apply_migrations: bool = False) -> FastAPI:
     settings = settings or load()
-    started = time.monotonic()   # proof run E6b (0.32.4 only): see config.py
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -101,8 +99,6 @@ def create_app(settings: Settings | None = None, *, apply_migrations: bool = Fal
         if left:
             return JSONResponse({**body, "status": "unhealthy", "reason": f"migrations pending: {', '.join(left)}"},
                                 status_code=503)
-        if settings.is_production and time.monotonic() - started >= settings.e6b_after_s:   # proof run E6b (0.32.4)
-            return JSONResponse({**body, "status": "unhealthy", "reason": "proof run E6b"}, status_code=503)
         return body
 
     return app
