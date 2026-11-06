@@ -2,6 +2,13 @@
 
 Every release is one `## [x.y.z]` section; the section is the release notes. The version is the file `VERSION`.
 
+## [0.32.4] — unreleased
+
+- Proof run E6b of the delivery pipeline, run again on the owner's word (2026-11-05): a release that starts healthy and
+  breaks a few minutes later, with no database change. In production `/health` turns unhealthy three minutes after start.
+  The rollback watch is expected to put 0.32.3 back by itself, with an issue and a message. 0.32.5 removes this. Nothing
+  else in the app changes.
+
 ## [0.32.3] — unreleased
 
 - **Tradier's real answers.** The first calls with the production token (2026-11-04) showed two defects. Production

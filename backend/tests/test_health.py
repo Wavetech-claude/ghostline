@@ -79,3 +79,14 @@ def test_docs_are_off():
     with TestClient(app) as c:
         assert c.get("/docs").status_code == 404 and c.get("/openapi.json").status_code == 404
     assert os.environ.get("ANTHROPIC_API_KEY") is None or True
+
+
+def test_health_turns_503_in_production_only_after_the_e6b_delay():
+    """Proof run E6b (0.32.4 only): production passes at start, so Coolify switches to it, and fails after the delay."""
+    with TestClient(create_app(settings(GHOSTLINE_ENV="prod", GHOSTLINE_E6B_AFTER_S="0"))) as c:
+        r = c.get("/health")
+    assert r.status_code == 503 and r.json()["reason"] == "proof run E6b"
+    with TestClient(create_app(settings(GHOSTLINE_ENV="prod"))) as c:   # within the delay: healthy
+        assert c.get("/health").status_code == 200
+    with TestClient(create_app(settings(GHOSTLINE_ENV="staging", GHOSTLINE_E6B_AFTER_S="0"))) as c:   # staging never fails
+        assert c.get("/health").status_code == 200
